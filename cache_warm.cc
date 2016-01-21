@@ -2,7 +2,7 @@
 //
 // cache_warm.cc
 //
-// Copyright (c) 2011-2016 Basho Technologies, Inc. All Rights Reserved.
+// Copyright (c) 2016 Basho Technologies, Inc. All Rights Reserved.
 //
 // This file is provided to you under the Apache License,
 // Version 2.0 (the "License"); you may not use this file
@@ -22,14 +22,8 @@
 
 #include <string>
 
-#include "db/db_impl.h"
-#include "db/filename.h"
-#include "db/log_reader.h"
-#include "db/log_writer.h"
-#include "db/table_cache.h"
-#include "db/version_edit.h"
-#include "leveldb/cache.h"
-#include "util/cache2.h"
+#include "leveldb_ee/cache_warm.h"
+
 
 namespace leveldb {
 
@@ -54,39 +48,52 @@ EncodeFileCacheObject(
 }   // EncodeFileCacheObject
 
 
-
-
-class WarmingAccumulator : public CacheAccumulator
+/**
+ * functor routine to take Cache value object
+ * and write to cache object warming log.
+ */
+bool
+WarmingAccumulator::operator()(void * Value)
 {
-protected:
-    size_t m_ValueCount;
-    std::string m_Record;
+    bool ret_flag(true);
 
-public:
-    WarmingAccumulator()
+    if (NULL!=Value)
     {
-        m_ValueCount=0;
-        m_Record.reserve(4096);
-    };
+        TableAndFile * tf;
 
-    std::string & GetRecord() {return(m_Record);};
+        tf=(TableAndFile *)Value;
+        EncodeFileCacheObject(m_Record, *tf);
+        ++m_ValueCount;
 
-    size_t GetCount() const {return(m_ValueCount);};
+        // write log record every 1,000 files
+        if (0==(m_ValueCount % 1000))
+            ret_flag=WriteRecord();
 
-    virtual bool operator()(void * Value)
+    }   // if
+    return(ret_flag);
+
+}   // WarmingAccumulator::operator()(void * Value)
+
+
+/**
+ * Take the current accumulation of file entries and
+ *  write a single log record to disk
+ */
+bool
+WarmingAccumulator::WriteRecord()
+{
+    bool ret_flag(false);
+
+    if (0!=m_Record.size())
     {
-        if (NULL!=Value)
-        {
-            TableAndFile * tf;
+        m_Status=m_LogFile.AddRecord(m_Record);
+        ret_flag=m_Status.ok();
+        m_Record.clear();
+    }   // if
 
-            tf=(TableAndFile *)Value;
-            EncodeFileCacheObject(m_Record, *tf);
-            ++m_ValueCount;
-        }   // if
-        return(true);
-    };
+    return(ret_flag);
 
-};  // class WarmingAccumulator
+}   // WarmingAccumulator::WriteRecord
 
 
 /**
@@ -104,11 +111,13 @@ TableCache::SaveOpenFileList()
     s = env_->NewWritableFile(cow_name, &cow_file, 4*1024L);
     if (s.ok())
     {
-        WarmingAccumulator acc;
-
         cow_log=new log::Writer(cow_file);
+
+        WarmingAccumulator acc(*cow_log);
+
         doublecache_.GetFileCache()->WalkCache(acc);
-        s = cow_log->AddRecord(acc.GetRecord());
+        acc.WriteRecord();  // flush partial record to disk
+        s = acc.GetStatus();
         delete cow_log;
         delete cow_file;
 
