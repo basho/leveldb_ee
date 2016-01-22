@@ -99,7 +99,7 @@ WarmingAccumulator::WriteRecord()
 /**
  * Riak specific routine to push list of open files to disk
  */
-void
+Status
 TableCache::SaveOpenFileList()
 {
     Status s;
@@ -139,7 +139,7 @@ TableCache::SaveOpenFileList()
             cow_name.c_str(), s.ToString().c_str());
     }   // else
 
-    return;
+    return(s);
 
 }   // TableCache::SaveOpenFiles
 
@@ -148,7 +148,7 @@ TableCache::SaveOpenFileList()
  * Riak specific routine to read list of previously open files
  *  and preload them into the table cache
  */
-void
+Status
 TableCache::PreloadTableCache()
 {
     struct LogReporter : public log::Reader::Reporter {
@@ -200,23 +200,24 @@ TableCache::PreloadTableCache()
             {
                 if (VersionEdit::kFileCacheObject==tag)
                 {
-                  GetVarint32(&input, &level);
-                  GetVarint64(&input, &file_no);
-                  GetVarint64(&input, &file_size);
+                    GetVarint32(&input, &level);
+                    GetVarint64(&input, &file_no);
+                    GetVarint64(&input, &file_size);
 
-                  // do not care if this succeeds, but need status
-                  //  for handle maintenance
-                  handle=NULL;
+                    // do not care if this succeeds, but need status
+                    //  for handle maintenance
+                    handle=NULL;
 
-                  // set compaction flag to suggest Linux start pre-reading the files
-                  s2=FindTable(file_no, file_size, level, &handle, (level<config::kNumOverlapLevels));
+                    // set compaction flag to suggest Linux start pre-reading the files
+                    s2=FindTable(file_no, file_size, level, &handle, (level<config::kNumOverlapLevels));
 
-                  if (s2.ok())
-                  {
-                      cache_->Release(handle);
-                      handle=NULL;
-                      ++obj_count;
-                  }   // if
+                    if (s2.ok())
+                    {
+                        if (NULL!=handle) // unit tests can return NULL
+                            cache_->Release(handle);
+                        handle=NULL;
+                        ++obj_count;
+                    }   // if
                 }   // if
                 else
                 {
@@ -224,22 +225,23 @@ TableCache::PreloadTableCache()
                         tag, cow_name.c_str());
                 }   // else
             }   // while
-      }   // while
+        }   // while
 
-      delete cow_log;
-      delete cow_file;
+        delete cow_log;
+        delete cow_file;
 
-      // delete the physical file at this point
-      //   (keep bad file for possible review?)
-      env_->DeleteFile(cow_name);
+        // delete the physical file at this point
+        //   (keep bad file for possible review?)
+        env_->DeleteFile(cow_name);
 
-      Log(options_->info_log, "File cache warmed with %zd files.", obj_count);
-  }   // if
-  else
-  {
-      Log(options_->info_log, "No cache warming file detected.");
-  }   // else
+        Log(options_->info_log, "File cache warmed with %zd files.", obj_count);
+    }   // if
+    else
+    {
+        Log(options_->info_log, "No cache warming file detected.");
+    }   // else
 
+    return(s);
 }   // TableCache::PreloadTableCache
 
 }  // namespace leveldb

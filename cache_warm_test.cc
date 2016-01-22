@@ -20,11 +20,15 @@
 //
 // -------------------------------------------------------------------
 
+#include <vector>
+
 #include "util/testharness.h"
 #include "util/testutil.h"
 
 #include "leveldb/table.h"
 #include "leveldb_ee/cache_warm.h"
+#include "leveldb/options.h"
+#include "util/cache2.h"
 
 /**
  * Execution routine
@@ -36,6 +40,43 @@ int main(int argc, char** argv)
 
 
 namespace leveldb {
+
+struct TestFileInfo
+{
+    uint64_t m_FileNum;
+    uint64_t m_FileSize;
+    int m_Level;
+};  // struct TestFileInfo
+
+typedef std::vector<struct TestFileInfo> TestFileInfoMap_t;
+
+
+/**
+ * a version of TableCache with FindFile() override for testing
+ */
+class TestingTableCache : public TableCache
+{
+public:
+    TestingTableCache(const std::string& dbname, const Options* options, Cache * file_cache,
+                      DoubleCache & doublecache, TestFileInfoMap_t & Map)
+        : TableCache(dbname, options, file_cache, doublecache), m_Map(Map)  {};
+
+    virtual Status FindTable(uint64_t file_number, uint64_t file_size, int level, Cache::Handle**, bool is_compaction=false)
+    {
+        TestFileInfo info;
+        info.m_FileNum=file_number;
+        info.m_FileSize=file_size;
+        info.m_Level=level;
+
+        m_Map.push_back(info);
+        return(Status::OK());
+    };
+
+    TestFileInfoMap_t & m_Map;
+
+};  // class TestingTableCache
+
+
 /**
  * a version of WritableFile that simply accumulates
  * output in a std::string.
@@ -93,7 +134,11 @@ public:
 
     CacheWarm()
     {
+        std::string cow_name;
+
         m_DbName=test::TmpDir() + "/cache_warm";
+        cow_name=CowFileName(m_DbName);
+        Env::Default()->DeleteFile(cow_name);
         Env::Default()->DeleteDir(m_DbName);
         m_Status=Env::Default()->CreateDir(m_DbName);
     };
@@ -101,6 +146,62 @@ public:
     ~CacheWarm()
     {
         Env::Default()->DeleteDir(m_DbName);
+    };
+
+    static void DeleteStubEntry(const Slice& Key, void* Value)
+    {
+        TableAndFile * tf;
+
+        tf=(TableAndFile *)Value;
+        delete tf->table;
+        delete tf;
+    }
+
+    static TableAndFile * BuildStubEntry(
+        int Level, uint64_t FileNumber, uint64_t FileSize)
+    {
+        TableAndFile * table;
+        TableStub * stub;
+
+        table=new TableAndFile;
+        stub=new TableStub;
+
+        table->level=Level;
+        table->file_number=FileNumber;
+        table->table=stub;
+        stub->SetFileSize(FileSize);
+
+        return(table);
+    }   // BuildStubEntry
+
+    static void BuildCacheEntry(
+        Cache * FileCache,
+        int Level, uint64_t FileNumber, uint64_t FileSize)
+    {
+        Slice key;
+        TableAndFile * table;
+        Cache::Handle * handle;
+
+        table=BuildStubEntry(Level, FileNumber, FileSize);
+
+        // real key is big endian
+        key=Slice((char *)&table->file_number, sizeof(&table->file_number));
+        handle=FileCache->Insert(key, table, 55, &DeleteStubEntry);
+        FileCache->Release(handle);
+    }   // BuildCacheEntry
+
+    struct LogReporter : public log::Reader::Reporter
+    {
+        Env* env;
+        Logger* info_log;
+        const char* fname;
+        Status* status;
+        virtual void Corruption(size_t bytes, const Status& s) {
+            Log(info_log, "%s%s: dropping %d bytes; %s",
+                (this->status == NULL ? "(ignoring error) " : ""),
+                fname, static_cast<int>(bytes), s.ToString().c_str());
+            if (this->status != NULL && this->status->ok()) *this->status = s;
+        }
     };
 
 };  // class CacheWarm
@@ -148,128 +249,174 @@ TEST(CacheWarm, LogRecords)
     // verify environment
     ASSERT_OK(m_Status);
 
+    table.level=1;
+    table.file_number=2;
+    stub.SetFileSize(3);
+    acc((void *)&table);
+    ASSERT_EQ(acc.GetRecord().size(), 4);
+    ASSERT_EQ(memcmp(acc.GetRecord().data(), "\012\001\002\003",4),0);
+    ASSERT_EQ(acc.GetCount(), 1);
 
+    table.level=4;
+    table.file_number=5;
+    stub.SetFileSize(6);
+    acc((void *)&table);
+    ASSERT_EQ(acc.GetRecord().size(), 8);
+    ASSERT_EQ(memcmp(acc.GetRecord().data(), "\012\001\002\003\012\004\005\006",8),0);
+    ASSERT_EQ(acc.GetCount(), 2);
+
+    // reset record via "write"
+    acc.WriteRecord();
+    ASSERT_EQ(acc.GetRecord().size(), 0);  // record purged ...
+    ASSERT_EQ(acc.GetCount(), 2);          // ... but count still good
+    ASSERT_EQ(string_file->GetString().size(), 8 + 7); // +7 is log::Writer header/prefix
+    ASSERT_EQ(memcmp(string_file->GetString().data()+7, "\012\001\002\003\012\004\005\006",8),0);
 
 }   // LogRecords
 
-#if 0
-TEST(DBTest, Empty) {
-  do {
-    ASSERT_TRUE(db_ != NULL);
-    ASSERT_EQ("NOT_FOUND", Get("foo"));
-  } while (ChangeOptions());
-}
-
-TEST(DBTest, DoubleOpen)
+/**
+ * Simulate table cache, does it produce expected records
+ */
+TEST(CacheWarm, WalkCache)
 {
-    ASSERT_NOTOK(DoubleOpen());
-}
+    StringWritableFile * string_file = new StringWritableFile;
+    log::Writer log_file(string_file);
+    WarmingAccumulator acc(log_file);
+    Options options;
+    DoubleCache double_cache(options);
+    Cache * file_cache;
 
-TEST(DBTest, ReadWrite) {
-  do {
-    ASSERT_OK(Put("foo", "v1"));
-    ASSERT_EQ("v1", Get("foo"));
-    ASSERT_OK(Put("bar", "v2"));
-    ASSERT_OK(Put("foo", "v3"));
-    ASSERT_EQ("v3", Get("foo"));
-    ASSERT_EQ("v2", Get("bar"));
-  } while (ChangeOptions());
-}
+    file_cache=double_cache.GetFileCache();
 
-TEST(DBTest, PutDeleteGet) {
-  do {
-    ASSERT_OK(db_->Put(WriteOptions(), "foo", "v1"));
-    ASSERT_EQ("v1", Get("foo"));
-    ASSERT_OK(db_->Put(WriteOptions(), "foo", "v2"));
-    ASSERT_EQ("v2", Get("foo"));
-    ASSERT_OK(db_->Delete(WriteOptions(), "foo"));
-    ASSERT_EQ("NOT_FOUND", Get("foo"));
-  } while (ChangeOptions());
-}
+    // verify environment
+    ASSERT_OK(m_Status);
 
-TEST(DBTest, GetFromImmutableLayer) {
-  do {
-    Options options = CurrentOptions();
-    options.env = env_;
-    options.write_buffer_size = 100000;  // Small write buffer
-    Reopen(&options);
+    //
+    // NOTE:  output order from file cache will not necessarily
+    //        be same as input order.
 
-    ASSERT_OK(Put("foo", "v1"));
-    ASSERT_EQ("v1", Get("foo"));
+    // BuildCacheEntry(cache, level, file_no, file_size)
+    BuildCacheEntry(file_cache, 0, 2, 3);
+    BuildCacheEntry(file_cache, 0, 4, 5);
+    BuildCacheEntry(file_cache, 0, 6, 7);
+    BuildCacheEntry(file_cache, 0, 8, 9);
+    BuildCacheEntry(file_cache, 1, 12, 13);
+    BuildCacheEntry(file_cache, 1, 14, 15);
+    BuildCacheEntry(file_cache, 1, 16, 17);
+    BuildCacheEntry(file_cache, 2, 22, 23);
+    BuildCacheEntry(file_cache, 2, 24, 25);
 
-    env_->delay_sstable_sync_.Release_Store(env_);   // Block sync calls
-    Put("k1", std::string(100000, 'x'));             // Fill memtable
-    Put("k2", std::string(100000, 'y'));             // Trigger compaction
-    ASSERT_EQ("v1", Get("foo"));
-    env_->delay_sstable_sync_.Release_Store(NULL);   // Release sync calls
-  } while (ChangeOptions());
-}
+    file_cache->WalkCache(acc);
+    // 4 bytes * 9 entries
+    ASSERT_EQ(acc.GetRecord().size(), 4*9);
+    ASSERT_EQ(acc.GetCount(), 9);
 
-TEST(DBTest, GetFromVersions) {
-  do {
-    ASSERT_OK(Put("foo", "v1"));
-    dbfull()->TEST_CompactMemTable();
-    ASSERT_EQ("v1", Get("foo"));
-  } while (ChangeOptions());
-}
+    acc.WriteRecord();
+    ASSERT_EQ(acc.GetRecord().size(), 0);  // record purged ...
+    ASSERT_EQ(acc.GetCount(), 9);          // ... but count still good
+    ASSERT_EQ(string_file->GetString().size(), (4*9) + 7); // +7 is log::Writer header/prefix
+    ASSERT_EQ(memcmp(string_file->GetString().data()+7,
+                     "\012\000\004\005" "\012\002\026\027" "\012\000\006\007" "\012\001\020\021"
+                     "\012\002\030\031" "\012\000\002\003" "\012\000\010\011" "\012\001\014\015"
+                     "\012\001\016\017",
+                     36),0);
 
-TEST(DBTest, GetSnapshot) {
-  do {
-    // Try with both a short key and a long key
-    for (int i = 0; i < 2; i++) {
-      std::string key = (i == 0) ? std::string("foo") : std::string(200, 'x');
-      ASSERT_OK(Put(key, "v1"));
-      const Snapshot* s1 = db_->GetSnapshot();
-      ASSERT_OK(Put(key, "v2"));
-      ASSERT_EQ("v2", Get(key));
-      ASSERT_EQ("v1", Get(key, s1));
-      dbfull()->TEST_CompactMemTable();
-      ASSERT_EQ("v2", Get(key));
-      ASSERT_EQ("v1", Get(key, s1));
-      db_->ReleaseSnapshot(s1);
-    }
-  } while (ChangeOptions());
-}
+}   // WalkCache
 
 
-TEST(DBTest, ApproximateSizes_MixOfSmallAndLarge) {
-  do {
-    Options options = CurrentOptions();
-    options.compression = kNoCompression;
-    Reopen();
+/**
+ * Build same cache as previous step, but actually write to file
+ *  then read back.
+ */
+TEST(CacheWarm, SimpleWriteRead)
+{
+    Options options;
+    DoubleCache double_cache(options);
+    Cache * file_cache(double_cache.GetFileCache());
+    TestFileInfoMap_t map;
+    TestingTableCache table_cache(m_DbName, &options, file_cache, double_cache, map);
+    Status s;
+    TestFileInfo info;
 
-    Random rnd(301);
-    std::string big1 = RandomString(&rnd, 100000);
-    ASSERT_OK(Put(Key(0), RandomString(&rnd, 10000)));
-    ASSERT_OK(Put(Key(1), RandomString(&rnd, 10000)));
-    ASSERT_OK(Put(Key(2), big1));
-    ASSERT_OK(Put(Key(3), RandomString(&rnd, 10000)));
-    ASSERT_OK(Put(Key(4), big1));
-    ASSERT_OK(Put(Key(5), RandomString(&rnd, 10000)));
-    ASSERT_OK(Put(Key(6), RandomString(&rnd, 300000)));
-    ASSERT_OK(Put(Key(7), RandomString(&rnd, 10000)));
+    // verify environment
+    ASSERT_OK(m_Status);
 
-    // Check sizes across recovery by reopening a few times
-    for (int run = 0; run < 3; run++) {
-      Reopen(&options);
+    //
+    // NOTE:  output order from file cache will not necessarily
+    //        be same as input order.
 
-      ASSERT_TRUE(Between(Size("", Key(0)), 0, 0));
-      ASSERT_TRUE(Between(Size("", Key(1)), 10000, 11000));
-      ASSERT_TRUE(Between(Size("", Key(2)), 20000, 21000));
-      ASSERT_TRUE(Between(Size("", Key(3)), 120000, 121000));
-      ASSERT_TRUE(Between(Size("", Key(4)), 130000, 131000));
-      ASSERT_TRUE(Between(Size("", Key(5)), 230000, 231000));
-      ASSERT_TRUE(Between(Size("", Key(6)), 240000, 241000));
-      ASSERT_TRUE(Between(Size("", Key(7)), 540000, 541000));
-      ASSERT_TRUE(Between(Size("", Key(8)), 550000, 560000));
+    // BuildCacheEntry(cache, level, file_no, file_size)
+    BuildCacheEntry(file_cache, 0, 2, 3);
+    BuildCacheEntry(file_cache, 0, 4, 5);
+    BuildCacheEntry(file_cache, 0, 6, 7);
+    BuildCacheEntry(file_cache, 0, 8, 9);
+    BuildCacheEntry(file_cache, 1, 12, 13);
+    BuildCacheEntry(file_cache, 1, 14, 15);
+    BuildCacheEntry(file_cache, 1, 16, 17);
+    BuildCacheEntry(file_cache, 2, 22, 23);
+    BuildCacheEntry(file_cache, 2, 24, 25);
 
-      ASSERT_TRUE(Between(Size(Key(3), Key(5)), 110000, 111000));
+    s=table_cache.SaveOpenFileList();
+    ASSERT_OK(s);
 
-      dbfull()->TEST_CompactRange(0, NULL, NULL);
-    }
-  } while (ChangeOptions());
-}
-#endif
+    s=table_cache.PreloadTableCache();
+    ASSERT_OK(s);
+
+    // validate output map
+    ASSERT_EQ(map.size(), 9);
+
+    ASSERT_EQ(map[0].m_FileNum, 4);
+    ASSERT_EQ(map[1].m_FileNum, 22);
+    ASSERT_EQ(map[2].m_FileNum, 6);
+    ASSERT_EQ(map[3].m_FileNum, 16);
+    ASSERT_EQ(map[4].m_FileNum, 24);
+    ASSERT_EQ(map[5].m_FileNum, 2);
+    ASSERT_EQ(map[6].m_FileNum, 8);
+    ASSERT_EQ(map[7].m_FileNum, 12);
+    ASSERT_EQ(map[8].m_FileNum, 14);
+
+}   // SimpleWriteRead
+
+
+/**
+ * Write 4,521 cache objects.  See if 4,521 come back.
+ *  Content not validate in current test.  Validating record management
+ */
+TEST(CacheWarm, LargeWriteRead)
+{
+    Options options;
+    DoubleCache double_cache(options);
+    Cache * file_cache(double_cache.GetFileCache());
+    TestFileInfoMap_t map;
+    TestingTableCache table_cache(m_DbName, &options, file_cache, double_cache, map);
+    Status s;
+    TestFileInfo info;
+    int loop;
+
+    // verify environment
+    ASSERT_OK(m_Status);
+
+    //
+    // NOTE:  output order from file cache will not necessarily
+    //        be same as input order.
+
+    // BuildCacheEntry(cache, level, file_no, file_size)
+    for (loop=0; loop<4521; ++loop)
+    {
+        BuildCacheEntry(file_cache, 0, loop, 3);
+    }   // for
+
+    s=table_cache.SaveOpenFileList();
+    ASSERT_OK(s);
+
+    s=table_cache.PreloadTableCache();
+    ASSERT_OK(s);
+
+    // validate output map
+    ASSERT_EQ(map.size(), 4521);
+
+}   // LargeWriteRead
+
 
 }  // namespace leveldb
 
