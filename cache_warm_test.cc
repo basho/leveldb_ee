@@ -239,7 +239,7 @@ TEST(CacheWarm, Filename)
 TEST(CacheWarm, LogRecords)
 {
     StringWritableFile * string_file = new StringWritableFile;
-    log::Writer log_file(string_file);
+    log::Writer * log_file=new log::Writer(string_file);
     WarmingAccumulator acc(log_file);
     TableStub stub;
     TableAndFile table;
@@ -280,7 +280,7 @@ TEST(CacheWarm, LogRecords)
 TEST(CacheWarm, WalkCache)
 {
     StringWritableFile * string_file = new StringWritableFile;
-    log::Writer log_file(string_file);
+    log::Writer * log_file=new log::Writer(string_file);
     WarmingAccumulator acc(log_file);
     Options options;
     DoubleCache double_cache(options);

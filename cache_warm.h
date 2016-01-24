@@ -44,22 +44,28 @@ class WarmingAccumulator : public CacheAccumulator
 protected:
     size_t m_ValueCount;
     std::string m_Record;
-    log::Writer & m_LogFile;
+    log::Writer * m_LogFile;
     Status m_Status;
 
 public:
     WarmingAccumulator(
-        log::Writer & LogFile)
+        log::Writer * LogFile)
         : m_LogFile(LogFile)
     {
         m_ValueCount=0;
         m_Record.reserve(4096);
+        if (NULL==m_LogFile)
+            m_Status=Status::InvalidArgument("NULL file pointer argument.");
     };
 
     virtual ~WarmingAccumulator()
     {
-        WriteRecord();
-        m_LogFile.Close();
+        if (m_Status.ok())
+        {
+            WriteRecord();
+            m_LogFile->Close();
+        }   // if
+        delete m_LogFile;
     };
 
     // this operator() function is the "interface" routine

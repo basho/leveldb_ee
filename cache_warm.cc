@@ -84,9 +84,9 @@ WarmingAccumulator::WriteRecord()
 {
     bool ret_flag(false);
 
-    if (0!=m_Record.size())
+    if (0!=m_Record.size() && m_Status.ok())
     {
-        m_Status=m_LogFile.AddRecord(m_Record);
+        m_Status=m_LogFile->AddRecord(m_Record);
         ret_flag=m_Status.ok();
         m_Record.clear();
     }   // if
@@ -104,22 +104,22 @@ TableCache::SaveOpenFileList()
 {
     Status s;
     std::string cow_name;
-    WritableFile * cow_file;
-    log::Writer * cow_log;
+    WritableFile * cow_file(NULL);
+    log::Writer * cow_log(NULL);
 
     cow_name=CowFileName(dbname_);
     s = env_->NewWritableFile(cow_name, &cow_file, 4*1024L);
     if (s.ok())
     {
+        // cow_log now owns cow_file and will delete it
         cow_log=new log::Writer(cow_file);
 
-        WarmingAccumulator acc(*cow_log);
+        // warming object now owns cow_log
+        WarmingAccumulator acc(cow_log);
 
         doublecache_.GetFileCache()->WalkCache(acc);
         acc.WriteRecord();  // flush partial record to disk
         s = acc.GetStatus();
-        delete cow_log;
-        delete cow_file;
 
         if (s.ok())
         {
