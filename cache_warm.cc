@@ -194,8 +194,7 @@ TableCache::PreloadTableCache()
             Cache::Handle * handle;
             Status s2;
 
-            // the on disk format is created in WriteFileCacheObjectWarming()
-            //  (util/cache2.cc)
+            // the on disk format is created in EncodeFileCacheObject() above
             while (GetVarint32(&input, &tag))
             {
                 if (VersionEdit::kFileCacheObject==tag)

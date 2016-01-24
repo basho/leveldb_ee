@@ -52,7 +52,7 @@ typedef std::vector<struct TestFileInfo> TestFileInfoMap_t;
 
 
 /**
- * a version of TableCache with FindFile() override for testing
+ * a version of TableCache with FindTable() override for testing
  */
 class TestingTableCache : public TableCache
 {
