@@ -21,9 +21,10 @@
 // -------------------------------------------------------------------
 
 #ifndef EXPIRY_EE_H
-#define EXPIRY_EE_H 1
+#define EXPIRY_EE_H
 
 #include "leveldb/expiry.h"
+#include "leveldb/perf_count.h"
 
 namespace leveldb
 {
@@ -50,6 +51,17 @@ public:
         uint8_t & ValType,   // input/output: key type. call might change
         uint64_t & Expiry);  // input/output: 0 or specific expiry. call might change
 
+    // db/dbformat.cc KeyRetirement::operator() calls this.
+    // returns true if key is expired, returns false if key not expired
+    virtual bool KeyRetirementCallback(
+        const ParsedInternalKey & Ikey);  // input: key to examine for retirement
+
+    // table/table_builder.cc TableBuilder::Add() calls this.
+    // returns false on internal error
+    virtual bool TableBuilderCallback(
+        const Slice & key,       // input: internal key
+        SstCounters & counters); // input/output: counters for new sst table
+
 public:
     // configuration values
     // Riak specific option authorizing leveldb to eliminate entire
@@ -62,19 +74,7 @@ public:
     // disables expiry feature.
     uint64_t m_ExpiryMinutes;
 
-
-
 };  // ExpiryModule
-
-
-#if 0
-
-
-
-#endif
-
-
-
 
 }  // namespace leveldb
 

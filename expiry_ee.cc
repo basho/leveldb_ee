@@ -23,9 +23,10 @@
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
 
-#include "leveldb_ee/expiry_ee.h"
+#include "leveldb/perf_count.h"
 #include "leveldb/env.h"
 #include "db/dbformat.h"
+#include "leveldb_ee/expiry_ee.h"
 #include "util/logging.h"
 
 namespace leveldb {
@@ -59,4 +60,77 @@ bool ExpiryModuleEE::MemTableInserterCallback(
 
 }   // ExpiryModuleEE::MemTableInserterCallback
 
+
+/**
+ * Returns true if key is expired.  False if key is NOT expired
+ */
+bool ExpiryModuleEE::KeyRetirementCallback(
+    const ParsedInternalKey & Ikey)
+{
+    bool is_expired(false);
+    uint64_t now, expires;
+
+    switch(Ikey.type)
+    {
+        case kTypeDeletion:
+        case kTypeValue:
+        default:
+            is_expired=false;
+            break;
+
+        case kTypeValueWriteTime:
+            if (0!=m_ExpiryMinutes && 0!=Ikey.expiry)
+            {
+                now=Env::Default()->NowMicros();
+                expires=m_ExpiryMinutes*60000000ULL+Ikey.expiry;
+                is_expired=(expires<=now);
+            }   // if
+            break;
+
+        case kTypeValueExplicitExpiry:
+            if (0!=Ikey.expiry)
+            {
+                now=Env::Default()->NowMicros();
+                is_expired=(Ikey.expiry<=now);
+            }   // if
+            break;
+    }   // switch
+
+    return(is_expired);
+
+}   // ExpiryModuleEE::KeyRetirementCallback
+
+
+bool ExpiryModuleEE::TableBuilderCallback(
+    const Slice & Key,
+    SstCounters & Counters)
+{
+    bool good(true);
+    ExpiryTime expires, temp;
+
+    expires=ExtractExpiry(Key);
+
+    switch(ExtractValueType(Key))
+    {
+        case kTypeValueWriteTime:
+            temp=Counters.Value(eSstCountExpiry1);
+            if (expires<temp || 0==temp)
+                Counters.Set(eSstCountExpiry1, expires);
+            if (Counters.Value(eSstCountExpiry2)<expires)
+                Counters.Set(eSstCountExpiry2, expires);
+            break;
+
+        case kTypeValueExplicitExpiry:
+            if (Counters.Value(eSstCountExpiry3)<expires)
+                Counters.Set(eSstCountExpiry3, expires);
+            break;
+
+        default:
+            assert(0);
+            break;
+    }   // switch
+
+    return(good);
+
+}   // ExpiryModuleEE::TableBuilderCallback
 }  // namespace leveldb
