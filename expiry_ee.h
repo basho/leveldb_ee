@@ -25,6 +25,7 @@
 
 #include "leveldb/expiry.h"
 #include "leveldb/perf_count.h"
+#include "db/dbformat.h"
 
 namespace leveldb
 {
@@ -49,18 +50,25 @@ public:
         const Slice & Key,   // input: user's key about to be written
         const Slice & Value, // input: user's value object
         uint8_t & ValType,   // input/output: key type. call might change
-        uint64_t & Expiry);  // input/output: 0 or specific expiry. call might change
+        uint64_t & Expiry) const;  // input/output: 0 or specific expiry. call might change
 
     // db/dbformat.cc KeyRetirement::operator() calls this.
+    // db/version_set.cc SaveValue() calls this too.
     // returns true if key is expired, returns false if key not expired
     virtual bool KeyRetirementCallback(
-        const ParsedInternalKey & Ikey);  // input: key to examine for retirement
+        const ParsedInternalKey & Ikey) const;  // input: key to examine for retirement
 
     // table/table_builder.cc TableBuilder::Add() calls this.
     // returns false on internal error
     virtual bool TableBuilderCallback(
         const Slice & key,       // input: internal key
-        SstCounters & counters); // input/output: counters for new sst table
+        SstCounters & counters) const; // input/output: counters for new sst table
+
+    // db/memtable.cc MemTable::Get() calls this.
+    // returns true if type/expiry is expired, returns false if not expired
+    virtual bool MemTableCallback(
+        uint8_t Type,              // input: ValueType from key
+        const uint64_t & Expiry) const;  // input: Expiry from key, or zero
 
 public:
     // configuration values

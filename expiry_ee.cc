@@ -46,6 +46,7 @@ bool ExpiryModuleEE::MemTableInserterCallback(
     const Slice & Value, // input: user's value object
     uint8_t & ValType,   // input/output: key type. call might change
     uint64_t & Expiry)   // input/output: 0 or specific expiry. call might change
+    const
 {
     bool good(true);
 
@@ -65,45 +66,17 @@ bool ExpiryModuleEE::MemTableInserterCallback(
  * Returns true if key is expired.  False if key is NOT expired
  */
 bool ExpiryModuleEE::KeyRetirementCallback(
-    const ParsedInternalKey & Ikey)
+    const ParsedInternalKey & Ikey) const
 {
-    bool is_expired(false);
-    uint64_t now, expires;
 
-    switch(Ikey.type)
-    {
-        case kTypeDeletion:
-        case kTypeValue:
-        default:
-            is_expired=false;
-            break;
-
-        case kTypeValueWriteTime:
-            if (0!=m_ExpiryMinutes && 0!=Ikey.expiry)
-            {
-                now=Env::Default()->NowMicros();
-                expires=m_ExpiryMinutes*60000000ULL+Ikey.expiry;
-                is_expired=(expires<=now);
-            }   // if
-            break;
-
-        case kTypeValueExplicitExpiry:
-            if (0!=Ikey.expiry)
-            {
-                now=Env::Default()->NowMicros();
-                is_expired=(Ikey.expiry<=now);
-            }   // if
-            break;
-    }   // switch
-
-    return(is_expired);
+    return(MemTableCallback(Ikey.type, Ikey.expiry));
 
 }   // ExpiryModuleEE::KeyRetirementCallback
 
 
 bool ExpiryModuleEE::TableBuilderCallback(
     const Slice & Key,
-    SstCounters & Counters)
+    SstCounters & Counters) const
 {
     bool good(true);
     ExpiryTime expires, temp;
@@ -133,4 +106,48 @@ bool ExpiryModuleEE::TableBuilderCallback(
     return(good);
 
 }   // ExpiryModuleEE::TableBuilderCallback
+
+
+/**
+ * Returns true if key is expired.  False if key is NOT expired
+ *  (used by KeyRetirementCallback too)
+ */
+bool ExpiryModuleEE::MemTableCallback(
+    uint8_t Type,
+    const uint64_t & Expiry) const
+{
+    bool is_expired(false);
+    uint64_t now, expires;
+
+    switch(Type)
+    {
+        case kTypeDeletion:
+        case kTypeValue:
+        default:
+            is_expired=false;
+            break;
+
+        case kTypeValueWriteTime:
+            if (0!=m_ExpiryMinutes && 0!=Expiry)
+            {
+                now=Env::Default()->NowMicros();
+                expires=m_ExpiryMinutes*60000000ULL+Expiry;
+                is_expired=(expires<=now);
+            }   // if
+            break;
+
+        case kTypeValueExplicitExpiry:
+            if (0!=Expiry)
+            {
+                now=Env::Default()->NowMicros();
+                is_expired=(Expiry<=now);
+            }   // if
+            break;
+    }   // switch
+
+    return(is_expired);
+
+}   // ExpiryModuleEE::KeyRetirementCallback
+
+
 }  // namespace leveldb
