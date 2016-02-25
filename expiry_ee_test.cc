@@ -81,8 +81,8 @@ TEST(ExpiryTester, MemTableInserterCallback)
     bool flag;
     uint64_t before, after;
     ExpiryModuleEE module;
-    uint8_t type;
-    uint64_t expiry;
+    ValueType type;
+    ExpiryTime expiry;
     Slice key, value;
 
     module.m_WholeFiles=true;
@@ -99,9 +99,9 @@ TEST(ExpiryTester, MemTableInserterCallback)
     type=kTypeValue;
     expiry=0;
     module.m_ExpiryMinutes=30;
-    before=Env::Default()->NowMicros();
+    before=port::NowUint64();
     flag=module.MemTableInserterCallback(key, value, type, expiry);
-    after=Env::Default()->NowMicros();
+    after=port::NowUint64();
     ASSERT_EQ(flag, true);
     ASSERT_EQ(type, kTypeValueWriteTime);
     ASSERT_TRUE(before <= expiry && expiry <=after && 0!=expiry);
@@ -110,9 +110,9 @@ TEST(ExpiryTester, MemTableInserterCallback)
     type=kTypeValue;
     expiry=0;
     module.m_ExpiryMinutes=0;
-    before=Env::Default()->NowMicros();
+    before=port::NowUint64();
     flag=module.MemTableInserterCallback(key, value, type, expiry);
-    after=Env::Default()->NowMicros();
+    after=port::NowUint64();
     ASSERT_EQ(flag, true);
     ASSERT_EQ(type, kTypeValue);
     ASSERT_EQ(expiry, 0);
@@ -121,9 +121,9 @@ TEST(ExpiryTester, MemTableInserterCallback)
     type=kTypeValueWriteTime;
     expiry=0;
     module.m_ExpiryMinutes=30;
-    before=Env::Default()->NowMicros();
+    before=port::NowUint64();
     flag=module.MemTableInserterCallback(key, value, type, expiry);
-    after=Env::Default()->NowMicros();
+    after=port::NowUint64();
     ASSERT_EQ(flag, true);
     ASSERT_EQ(type, kTypeValueWriteTime);
     ASSERT_TRUE(before <= expiry && expiry <=after && 0!=expiry);
