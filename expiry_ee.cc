@@ -44,8 +44,8 @@ ExpiryModuleEE::Dump(
 bool ExpiryModuleEE::MemTableInserterCallback(
     const Slice & Key,   // input: user's key about to be written
     const Slice & Value, // input: user's value object
-    uint8_t & ValType,   // input/output: key type. call might change
-    uint64_t & Expiry)   // input/output: 0 or specific expiry. call might change
+    ValueType & ValType,   // input/output: key type. call might change
+    ExpiryTime & Expiry)   // input/output: 0 or specific expiry. call might change
     const
 {
     bool good(true);
@@ -54,7 +54,7 @@ bool ExpiryModuleEE::MemTableInserterCallback(
         || (kTypeValue==ValType && 0!=m_ExpiryMinutes))
     {
         ValType=kTypeValueWriteTime;
-        Expiry=Env::Default()->NowMicros();
+        Expiry=port::NowUint64();
     }   // if
 
     return(good);
@@ -113,8 +113,8 @@ bool ExpiryModuleEE::TableBuilderCallback(
  *  (used by KeyRetirementCallback too)
  */
 bool ExpiryModuleEE::MemTableCallback(
-    uint8_t Type,
-    const uint64_t & Expiry) const
+    ValueType Type,
+    const ExpiryTime & Expiry) const
 {
     bool is_expired(false);
     uint64_t now, expires;
@@ -130,7 +130,7 @@ bool ExpiryModuleEE::MemTableCallback(
         case kTypeValueWriteTime:
             if (0!=m_ExpiryMinutes && 0!=Expiry)
             {
-                now=Env::Default()->NowMicros();
+                now=port::NowUint64();
                 expires=m_ExpiryMinutes*60000000ULL+Expiry;
                 is_expired=(expires<=now);
             }   // if
@@ -139,7 +139,7 @@ bool ExpiryModuleEE::MemTableCallback(
         case kTypeValueExplicitExpiry:
             if (0!=Expiry)
             {
-                now=Env::Default()->NowMicros();
+                now=port::NowUint64();
                 is_expired=(Expiry<=now);
             }   // if
             break;
