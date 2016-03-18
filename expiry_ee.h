@@ -23,9 +23,12 @@
 #ifndef EXPIRY_EE_H
 #define EXPIRY_EE_H
 
+#include <vector>
+
 #include "leveldb/expiry.h"
 #include "leveldb/perf_count.h"
 #include "db/dbformat.h"
+#include "db/version_edit.h"
 
 namespace leveldb
 {
@@ -65,8 +68,13 @@ public:
     // db/memtable.cc MemTable::Get() calls this.
     // returns true if type/expiry is expired, returns false if not expired
     virtual bool MemTableCallback(
-        ValueType Type,              // input: ValueType from key
-        const ExpiryTime & Expiry) const;  // input: Expiry from key, or zero
+        const Slice & Key) const;    // input: leveldb internal key
+
+    // db/version_set.cc VersionSet::Finalize() calls this if no
+    //  other compaction selected for a level
+    // returns true if there is an expiry compaction eligible
+    virtual bool CompactionFinalizeCallback(
+        const std::vector<FileMetaData*> & Level) const;  //input: file objects at target level
 
 public:
     // configuration values

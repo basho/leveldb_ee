@@ -28,6 +28,7 @@
 #include "db/dbformat.h"
 #include "leveldb_ee/expiry_ee.h"
 #include "util/logging.h"
+#include "util/throttle.h"
 
 namespace leveldb {
 void
@@ -54,7 +55,7 @@ bool ExpiryModuleEE::MemTableInserterCallback(
         || (kTypeValue==ValType && 0!=m_ExpiryMinutes))
     {
         ValType=kTypeValueWriteTime;
-        Expiry=port::NowUint64();
+        Expiry=GetTimeMinutes();
     }   // if
 
     return(good);
@@ -68,8 +69,41 @@ bool ExpiryModuleEE::MemTableInserterCallback(
 bool ExpiryModuleEE::KeyRetirementCallback(
     const ParsedInternalKey & Ikey) const
 {
+    bool is_expired(false);
+    uint64_t now, expires;
 
-    return(MemTableCallback(Ikey.type, Ikey.expiry));
+    // m_ExpiryMinutes must be non-zero for any expiry
+    //  to work.  It is an override switch
+    if (0!=m_ExpiryMinutes)
+    {
+        switch(Ikey.type)
+        {
+            case kTypeDeletion:
+            case kTypeValue:
+            default:
+                is_expired=false;
+                break;
+
+            case kTypeValueWriteTime:
+                if (0!=m_ExpiryMinutes && 0!=Ikey.expiry)
+                {
+                    now=GetTimeMinutes();
+                    expires=m_ExpiryMinutes*60000000ULL+Ikey.expiry;
+                    is_expired=(expires<=now);
+                }   // if
+                break;
+
+            case kTypeValueExplicitExpiry:
+                if (0!=Ikey.expiry)
+                {
+                    now=GetTimeMinutes();
+                    is_expired=(Ikey.expiry<=now);
+                }   // if
+                break;
+        }   // switch
+    }   // if
+
+    return(is_expired);
 
 }   // ExpiryModuleEE::KeyRetirementCallback
 
@@ -113,41 +147,49 @@ bool ExpiryModuleEE::TableBuilderCallback(
  *  (used by KeyRetirementCallback too)
  */
 bool ExpiryModuleEE::MemTableCallback(
-    ValueType Type,
-    const ExpiryTime & Expiry) const
+    const Slice & InternalKey) const
 {
-    bool is_expired(false);
-    uint64_t now, expires;
+    bool is_expired(false), good;
+    ParsedInternalKey parsed;
 
-    switch(Type)
-    {
-        case kTypeDeletion:
-        case kTypeValue:
-        default:
-            is_expired=false;
-            break;
+    good=ParseInternalKey(InternalKey, &parsed);
 
-        case kTypeValueWriteTime:
-            if (0!=m_ExpiryMinutes && 0!=Expiry)
-            {
-                now=port::NowUint64();
-                expires=m_ExpiryMinutes*60000000ULL+Expiry;
-                is_expired=(expires<=now);
-            }   // if
-            break;
-
-        case kTypeValueExplicitExpiry:
-            if (0!=Expiry)
-            {
-                now=port::NowUint64();
-                is_expired=(Expiry<=now);
-            }   // if
-            break;
-    }   // switch
+    if (good)
+        is_expired=KeyRetirementCallback(parsed);
 
     return(is_expired);
 
-}   // ExpiryModuleEE::KeyRetirementCallback
+}   // ExpiryModuleEE::MemTableCallback
 
+
+/**
+ * Returns true if at least one file on this level
+ *  is eligible for full file expiry
+ */
+
+bool ExpiryModuleEE::CompactionFinalizeCallback(
+    const std::vector<FileMetaData*> & Level) const
+{
+    bool expired_file(false);
+
+    // All expiry disabled if m_Expiry set to zero.
+    if (0!=m_ExpiryMinutes && m_WholeFiles)
+    {
+        ExpiryTime now, aged;
+        std::vector<FileMetaData*>::const_iterator it;
+
+        now=GetTimeMinutes();
+        aged=now - m_ExpiryMinutes*60000000;
+        for (it=Level.begin(); !expired_file && Level.end()!=it; ++it)
+        {
+            // aged above highest aged, or now above highest explicit
+            expired_file = ((0!=(*it)->expiry2 && (*it)->expiry2<=aged)
+                            || (0!=(*it)->expiry3 && (*it)->expiry3<=now));
+        }   // for
+    }   // if
+
+    return(expired_file);
+
+}   // ExpiryModuleEE::CompactionFinalizeCallback
 
 }  // namespace leveldb
