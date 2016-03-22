@@ -211,6 +211,7 @@ TEST(ExpiryTester, MemTableCallback)
 /**
  * Validate CompactionFinalizeCallback
  */
+#if 0
 TEST(ExpiryTester, CompactionFinalizeCallback)
 {
     bool flag;
@@ -347,6 +348,6 @@ TEST(ExpiryTester, CompactionFinalizeCallback)
 
 
 }   // test CompactionFinalizeCallback
-
+#endif
 }  // namespace leveldb
 
