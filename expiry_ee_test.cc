@@ -68,8 +68,9 @@ TEST(ExpiryTester, Defaults)
 {
     ExpiryModuleEE expiry;
 
-    ASSERT_EQ(expiry.m_WholeFiles, true);
+    ASSERT_EQ(expiry.m_ExpiryEnabled, false);
     ASSERT_EQ(expiry.m_ExpiryMinutes, 0);
+    ASSERT_EQ(expiry.m_WholeFileExpiry, false);
 
 }   // test Defaults
 
@@ -86,7 +87,8 @@ TEST(ExpiryTester, MemTableInserterCallback)
     ExpiryTime expiry;
     Slice key, value;
 
-    module.m_WholeFiles=true;
+    module.m_ExpiryEnabled=true;
+    module.m_WholeFileExpiry=true;
 
     // deletion, do nothing
     type=kTypeDeletion;
@@ -157,7 +159,8 @@ TEST(ExpiryTester, MemTableCallback)
     ExpiryTime expiry;
     Slice key, value;
 
-    module.m_WholeFiles=true;
+    module.m_ExpiryEnabled=true;
+    module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=5;
 
     before=port::TimeUint64();
@@ -183,11 +186,12 @@ TEST(ExpiryTester, MemTableCallback)
     flag=module.MemTableCallback(key3.internal_key());
     ASSERT_EQ(flag, true);
     // disable expiry
-    module.m_ExpiryMinutes=0;
+    module.m_ExpiryEnabled=false;
     flag=module.MemTableCallback(key3.internal_key());
     ASSERT_EQ(flag, false);
 
     // age expiry
+    module.m_ExpiryEnabled=true;
     module.m_ExpiryMinutes=2;
     after=GetTimeMinutes();
     InternalKey key4("AgeKey", after, 0, kTypeValueWriteTime);
@@ -201,7 +205,7 @@ TEST(ExpiryTester, MemTableCallback)
     flag=module.MemTableCallback(key4.internal_key());
     ASSERT_EQ(flag, true);
     // disable expiry
-    module.m_ExpiryMinutes=0;
+    module.m_ExpiryEnabled=false;
     flag=module.MemTableCallback(key4.internal_key());
     ASSERT_EQ(flag, false);
 
@@ -220,7 +224,7 @@ TEST(ExpiryTester, CompactionFinalizeCallback)
     FileMetaData * file_ptr;
     ExpiryModuleEE module;
 
-    module.m_WholeFiles=true;
+    module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=5;
 
     now=port::TimeUint64();
@@ -238,13 +242,13 @@ TEST(ExpiryTester, CompactionFinalizeCallback)
     files.push_back(file_ptr);
 
     // disable
-    module.m_WholeFiles=false;
+    module.m_WholeFileExpiry=false;
     module.m_ExpiryMinutes=0;
     flag=module.CompactionFinalizeCallback(files);
     ASSERT_EQ(flag, false);
 
     // enable and move clock
-    module.m_WholeFiles=true;
+    module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=1;
     SetTimeMinutes(now + 120*1000000);
     flag=module.CompactionFinalizeCallback(files);
@@ -259,25 +263,25 @@ TEST(ExpiryTester, CompactionFinalizeCallback)
     files.push_back(file_ptr);
 
     // disable
-    module.m_WholeFiles=false;
+    module.m_WholeFileExpiry=false;
     module.m_ExpiryMinutes=0;
     flag=module.CompactionFinalizeCallback(files);
     ASSERT_EQ(flag, false);
 
     // enable aged only
-    module.m_WholeFiles=false;
+    module.m_WholeFileExpiry=false;
     module.m_ExpiryMinutes=1;
     flag=module.CompactionFinalizeCallback(files);
     ASSERT_EQ(flag, false);
 
     // enable file too
-    module.m_WholeFiles=true;
+    module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=1;
     flag=module.CompactionFinalizeCallback(files);
     ASSERT_EQ(flag, true);
 
     // enable file, but not expiry minutes (disable)
-    module.m_WholeFiles=true;
+    module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=0;
     flag=module.CompactionFinalizeCallback(files);
     ASSERT_EQ(flag, false);
@@ -302,45 +306,45 @@ TEST(ExpiryTester, CompactionFinalizeCallback)
     ASSERT_EQ(flag, false);
 
     // enable aged only
-    module.m_WholeFiles=false;
+    module.m_WholeFileExpiry=false;
     module.m_ExpiryMinutes=1;
     flag=module.CompactionFinalizeCallback(files);
     ASSERT_EQ(flag, false);
 
     // enable file too
-    module.m_WholeFiles=true;
+    module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=1;
     flag=module.CompactionFinalizeCallback(files);
     ASSERT_EQ(flag, true);
 
     // enable file, but not expiry minutes (disable)
-    module.m_WholeFiles=true;
+    module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=0;
     flag=module.CompactionFinalizeCallback(files);
     ASSERT_EQ(flag, false);
 
     // extend aging
-    module.m_WholeFiles=true;
+    module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=5;
     flag=module.CompactionFinalizeCallback(files);
     ASSERT_EQ(flag, false);
 
     // push clock back
-    module.m_WholeFiles=true;
+    module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=1;
     SetTimeMinutes(now + 30*1000000);
     flag=module.CompactionFinalizeCallback(files);
     ASSERT_EQ(flag, false);
 
     // recreate fail case
-    module.m_WholeFiles=true;
+    module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=1;
     SetTimeMinutes(now + 90*1000000);
     flag=module.CompactionFinalizeCallback(files);
     ASSERT_EQ(flag, false);
 
     // recreate fail case
-    module.m_WholeFiles=true;
+    module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=1;
     SetTimeMinutes(now + 120*1000000);
     flag=module.CompactionFinalizeCallback(files);

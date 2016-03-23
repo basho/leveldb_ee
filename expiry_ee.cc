@@ -37,8 +37,9 @@ void
 ExpiryModuleEE::Dump(
     Logger * log) const
 {
-    Log(log,"    ExpiryModuleEE.whole_files: %s", m_WholeFiles ? "true" : "false");
+    Log(log," ExpiryModuleEE.expiry_enabled: %s", m_ExpiryEnabled ? "true" : "false");
     Log(log," ExpiryModuleEE.expiry_minutes: %" PRIu64, m_ExpiryMinutes);
+    Log(log,"    ExpiryModuleEE.whole_files: %s", m_WholeFileExpiry ? "true" : "false");
 
     return;
 
@@ -53,8 +54,10 @@ bool ExpiryModuleEE::MemTableInserterCallback(
 {
     bool good(true);
 
+    // only update the expiry time if explicit type
+    //  without expiry, or ExpiryMinutes set
     if ((kTypeValueWriteTime==ValType && 0==Expiry)
-        || (kTypeValue==ValType && 0!=m_ExpiryMinutes))
+        || (kTypeValue==ValType && 0!=m_ExpiryMinutes && m_ExpiryEnabled))
     {
         ValType=kTypeValueWriteTime;
         Expiry=GetTimeMinutes();
@@ -75,9 +78,7 @@ bool ExpiryModuleEE::KeyRetirementCallback(
     bool is_expired(false);
     uint64_t now, expires;
 
-    // m_ExpiryMinutes must be non-zero for any expiry
-    //  to work.  It is an override switch
-    if (0!=m_ExpiryMinutes)
+    if (m_ExpiryEnabled)
     {
         switch(Ikey.type)
         {
@@ -128,6 +129,8 @@ bool ExpiryModuleEE::TableBuilderCallback(
 
     expires=ExtractExpiry(Key);
 
+    // only updating counters.  do this even if
+    //  expiry disabled
     switch(ExtractValueType(Key))
     {
         case kTypeValueWriteTime:
@@ -216,8 +219,7 @@ bool ExpiryModuleEE::CompactionFinalizeCallback(
 {
     bool expired_file(false);
 
-    // All expiry disabled if m_Expiry set to zero.
-    if (0!=m_ExpiryMinutes && m_WholeFiles)
+    if (m_ExpiryEnabled && m_WholeFileExpiry)
     {
         ExpiryTime now, aged;
         const std::vector<FileMetaData*> & files(Ver.GetFileList(Level));
@@ -229,7 +231,7 @@ bool ExpiryModuleEE::CompactionFinalizeCallback(
         for (it=files.begin(); (!expired_file || WantAll) && files.end()!=it; ++it)
         {
             // aged above highest aged, or now above highest explicit
-            expired_file = ((0!=(*it)->expiry2 && (*it)->expiry2<=aged)
+            expired_file = ((0!=(*it)->expiry2 && (*it)->expiry2<=aged && 0!=m_ExpiryMinutes)
                             || (0!=(*it)->expiry3 && (*it)->expiry3<=now));
 
             // identified an expired file, do any higher levels overlap
