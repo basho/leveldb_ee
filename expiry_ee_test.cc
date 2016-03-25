@@ -20,14 +20,18 @@
 //
 // -------------------------------------------------------------------
 
+#include <limits.h>
+
 #include "util/testharness.h"
 #include "util/testutil.h"
 
+#include "leveldb/comparator.h"
 #include "leveldb/env.h"
 #include "leveldb/slice.h"
 #include "leveldb_ee/expiry_ee.h"
 
 #include "db/dbformat.h"
+#include "db/version_set.h"
 #include "util/throttle.h"
 
 /**
@@ -213,19 +217,43 @@ TEST(ExpiryTester, MemTableCallback)
 
 
 /**
- * Validate CompactionFinalizeCallback
+ * Wrapper class to Version that allows manipulation
+ *  of internal objects for testing purposes
  */
-#if 0
-TEST(ExpiryTester, CompactionFinalizeCallback)
+class VersionTester : public Version
+{
+public:
+    VersionTester() : Version(&m_Vset), m_Icmp(m_Options.comparator),
+                      m_Vset("", &m_Options, NULL, &m_Icmp)  {};
+
+    void SetFileList(int Level, FileMetaDataVector_t & Files)
+        {files_[Level]=Files;};
+
+    Options m_Options;
+    InternalKeyComparator m_Icmp;
+    VersionSet m_Vset;
+};  // class VersionTester
+
+
+/**
+ * Validate CompactionFinalizeCallback's
+ *  identification of expired files
+ */
+
+TEST(ExpiryTester, CompactionFinalizeCallback1)
 {
     bool flag;
     uint64_t now, aged, temp_time;
     std::vector<FileMetaData*> files;
     FileMetaData * file_ptr;
     ExpiryModuleEE module;
+    VersionTester ver;
+    int level;
 
+    module.m_ExpiryEnabled=true;
     module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=5;
+    level=config::kNumOverlapLevels;
 
     now=port::TimeUint64();
     SetTimeMinutes(now);
@@ -242,16 +270,20 @@ TEST(ExpiryTester, CompactionFinalizeCallback)
     files.push_back(file_ptr);
 
     // disable
+    module.m_ExpiryEnabled=false;
     module.m_WholeFileExpiry=false;
     module.m_ExpiryMinutes=0;
-    flag=module.CompactionFinalizeCallback(files);
+    ver.SetFileList(level, files);
+    flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
 
     // enable and move clock
+    module.m_ExpiryEnabled=true;
     module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=1;
     SetTimeMinutes(now + 120*1000000);
-    flag=module.CompactionFinalizeCallback(files);
+    ver.SetFileList(level, files);
+    flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
 
     // add file only containing explicit
@@ -259,32 +291,39 @@ TEST(ExpiryTester, CompactionFinalizeCallback)
     file_ptr=new FileMetaData;
     file_ptr->smallest.SetFrom(ParsedInternalKey("GG1", 0, 5, kTypeValue));
     file_ptr->largest.SetFrom(ParsedInternalKey("HH1", 0, 6, kTypeValue));
+    file_ptr->expiry1=ULONG_MAX;  // sign of no aged expiry
     file_ptr->expiry3=now + 60*1000000;
     files.push_back(file_ptr);
 
     // disable
+    module.m_ExpiryEnabled=false;
     module.m_WholeFileExpiry=false;
     module.m_ExpiryMinutes=0;
-    flag=module.CompactionFinalizeCallback(files);
+    ver.SetFileList(level, files);
+    flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
 
     // enable aged only
+    module.m_ExpiryEnabled=true;
     module.m_WholeFileExpiry=false;
     module.m_ExpiryMinutes=1;
-    flag=module.CompactionFinalizeCallback(files);
+    ver.SetFileList(level, files);
+    flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
 
     // enable file too
     module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=1;
-    flag=module.CompactionFinalizeCallback(files);
+    flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, true);
 
     // enable file, but not expiry minutes (disable)
+    //   ... but file without aged expiries
     module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=0;
-    flag=module.CompactionFinalizeCallback(files);
-    ASSERT_EQ(flag, false);
+    ver.SetFileList(level, files);
+    flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
+    ASSERT_EQ(flag, true);
 
     // remove explicit
     files.pop_back();
@@ -300,58 +339,66 @@ TEST(ExpiryTester, CompactionFinalizeCallback)
     files.push_back(file_ptr);
 
     // disable
-    module.m_WholeFiles=false;
+    module.m_WholeFileExpiry=false;
     module.m_ExpiryMinutes=0;
-    flag=module.CompactionFinalizeCallback(files);
+    ver.SetFileList(level, files);
+    flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
 
     // enable aged only
     module.m_WholeFileExpiry=false;
     module.m_ExpiryMinutes=1;
-    flag=module.CompactionFinalizeCallback(files);
+    flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
 
     // enable file too
     module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=1;
-    flag=module.CompactionFinalizeCallback(files);
+    flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, true);
 
     // enable file, but not expiry minutes (disable)
     module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=0;
-    flag=module.CompactionFinalizeCallback(files);
+    flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
 
     // extend aging
     module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=5;
-    flag=module.CompactionFinalizeCallback(files);
+    flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
 
     // push clock back
     module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=1;
     SetTimeMinutes(now + 30*1000000);
-    flag=module.CompactionFinalizeCallback(files);
+    flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
 
     // recreate fail case
     module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=1;
     SetTimeMinutes(now + 90*1000000);
-    flag=module.CompactionFinalizeCallback(files);
+    flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
 
     // recreate fail case
     module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=1;
     SetTimeMinutes(now + 120*1000000);
-    flag=module.CompactionFinalizeCallback(files);
+    flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, true);
 
 
+    // clean up phony files or Version destructor will crash
+    std::vector<FileMetaData*>::iterator it;
+    for (it=files.begin(); files.end()!=it; ++it)
+        delete (*it);
+    files.clear();
+    ver.SetFileList(level,files);
+
 }   // test CompactionFinalizeCallback
-#endif
+
 }  // namespace leveldb
 

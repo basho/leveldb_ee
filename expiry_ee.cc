@@ -22,6 +22,7 @@
 
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
+#include <limits.h>
 
 #include "leveldb/perf_count.h"
 #include "leveldb/env.h"
@@ -129,13 +130,19 @@ bool ExpiryModuleEE::TableBuilderCallback(
 
     expires=ExtractExpiry(Key);
 
+    // make really high so that everything is less than it
+    if (1==Counters.Value(eSstCountKeys))
+        Counters.Set(eSstCountExpiry1, ULONG_MAX);
+
     // only updating counters.  do this even if
     //  expiry disabled
     switch(ExtractValueType(Key))
     {
+        // expiry1 set to smallest (earliest) write time
+        // expiry2 set to largest (most recent) write time
         case kTypeValueWriteTime:
             temp=Counters.Value(eSstCountExpiry1);
-            if (expires<temp || 0==temp)
+            if (expires<temp)
                 Counters.Set(eSstCountExpiry1, expires);
             if (Counters.Value(eSstCountExpiry2)<expires)
                 Counters.Set(eSstCountExpiry2, expires);
@@ -154,8 +161,12 @@ bool ExpiryModuleEE::TableBuilderCallback(
                 Counters.Inc(eSstCountDeleteKey);
             break;
 
+        // at least one non-expiry, expiry1 gets zero
+        case kTypeValue:
+            Counters.Set(eSstCountExpiry1, 0);
+            break;
+
         default:
-            assert(0);
             break;
     }   // switch
 
@@ -187,30 +198,6 @@ bool ExpiryModuleEE::MemTableCallback(
  * Returns true if at least one file on this level
  *  is eligible for full file expiry
  */
-
-/**
-Notes:
-
-for Finalize():  find an eligible file, test if base for all keys (key range)
-                 - good if one found
-
-find first .sst with smallest greater than largest, then test prior to see its largest
-   is less smallest.
-
-
-for compaction:  find eligible file, test if base, add to list if base
-                 - find all files
-                 put into version_edit's delete, process version_edit
-
-
-Test if base:  use Compaction::IsBaseLevelForKey as model.  Has "history vector"
-               to help non-overlapped levels.  Must reset vector on overlapped levels
-
-??? smallest_snapshot concerns? ... if iterator started before expiration, should
-                                    it remain for life of iterator.
-
- */
-
 bool ExpiryModuleEE::CompactionFinalizeCallback(
     bool WantAll,                  // input: true - examine all expired files
     const Version & Ver,           // input: database state for examination
@@ -230,9 +217,19 @@ bool ExpiryModuleEE::CompactionFinalizeCallback(
         aged=now - m_ExpiryMinutes*60000000;
         for (it=files.begin(); (!expired_file || WantAll) && files.end()!=it; ++it)
         {
-            // aged above highest aged, or now above highest explicit
-            expired_file = ((0!=(*it)->expiry2 && (*it)->expiry2<=aged && 0!=m_ExpiryMinutes)
-                            || (0!=(*it)->expiry3 && (*it)->expiry3<=now));
+            // First, find an eligible file:
+            //  - if expiry1 is zero, game over -  contains non-expiry records
+            //  - if expiry2 is below current aged time and aging enabled,
+            //       or no expiry2 keys (is zero)
+            //  - highest explicit expiry (expiry3) is non-zero and below now
+            //  Note:  say file only contained deleted records:  ... still delete file
+            //      expiry1 would be ULONG_MAX, expiry2 would be 0, expiry3 would be zero
+            expired_file = (0!=(*it)->expiry1);
+            expired_file = expired_file && (((*it)->expiry2<=aged && 0!=m_ExpiryMinutes)
+                                            || 0==(*it)->expiry2);
+
+            expired_file = expired_file && (0==(*it)->expiry3
+                                            || (0!=(*it)->expiry3 && (*it)->expiry3<=now));
 
             // identified an expired file, do any higher levels overlap
             //  its key range?
@@ -264,7 +261,7 @@ bool ExpiryModuleEE::CompactionFinalizeCallback(
 
 }   // ExpiryModuleEE::CompactionFinalizeCallback
 
-#if 1
+
 /**
  * Riak specific routine to process whole file expiry.
  *  Code here derived from DBImpl::CompactMemTable() in db/db_impl.cc
@@ -274,41 +271,53 @@ DBImpl::BackgroundExpiry(
     Compaction * Compact)
 {
     Status s;
+    size_t count;
 
     mutex_.AssertHeld();
-    assert(NULL != Compact && NULL!=options_.expiry_module);
+    assert(NULL != Compact && NULL!=options_.expiry_module.get());
 
-    if (NULL!=Compact)
+    if (NULL!=Compact && NULL!=options_.expiry_module.get())
     {
         VersionEdit edit;
         Version* base = versions_->current();
         base->Ref();
         options_.expiry_module->CompactionFinalizeCallback(true, *base, Compact->level(),
-                                                      Compact->edit());
-        Status s = WriteLevel0Table(imm_, &edit, base);
+                                                           &edit);
         base->Unref();
+        count=edit.DeletedFileCount();
 
         if (s.ok() && shutting_down_.Acquire_Load()) {
             s = Status::IOError("Deleting DB during expiry compaction");
         }
 
         // push expired list to manifest
-        if (s.ok())
+        if (s.ok() && 0!=count)
         {
             s = versions_->LogAndApply(&edit, &mutex_);
-            if (!s.ok())
+            if (s.ok())
+                gPerfCounters->Add(ePerfExpiredFiles, count);
+            else
                 s = Status::IOError("LogAndApply error during expiry compaction");
         }   // if
 
         // Commit to the new state
         if (s.ok())
+        {
             DeleteObsoleteFiles();
+
+            // release mutex when writing to log file
+            mutex_.Unlock();
+
+            Log(options_.info_log,
+                "Expired: %zd files from level %d",
+                count, Compact->level());
+            mutex_.Lock();
+        }   // if
     }   // if
 
     return s;
 
 }   // DBImpl:BackgroundExpiry
 
-#endif
 
 }  // namespace leveldb
