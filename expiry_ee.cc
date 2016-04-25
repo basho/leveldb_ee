@@ -128,7 +128,10 @@ bool ExpiryModuleEE::TableBuilderCallback(
     bool good(true);
     ExpiryTime expires, temp;
 
-    expires=ExtractExpiry(Key);
+    if (IsExpiryKey(Key))
+        expires=ExtractExpiry(Key);
+    else
+        expires=0;
 
     // make really high so that everything is less than it
     if (1==Counters.Value(eSstCountKeys))
