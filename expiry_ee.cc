@@ -93,7 +93,7 @@ bool ExpiryModuleEE::KeyRetirementCallback(
                 if (0!=m_ExpiryMinutes && 0!=Ikey.expiry)
                 {
                     now=GetTimeMinutes();
-                    expires=m_ExpiryMinutes*60000000ULL+Ikey.expiry;
+                    expires=m_ExpiryMinutes*60*port::UINT64_ONE_SECOND + Ikey.expiry;
                     is_expired=(expires<=now);
                 }   // if
                 break;
@@ -217,7 +217,7 @@ bool ExpiryModuleEE::CompactionFinalizeCallback(
         size_t old_index[config::kNumLevels];
 
         now=GetTimeMinutes();
-        aged=now - m_ExpiryMinutes*60000000;
+        aged=now - m_ExpiryMinutes*60*port::UINT64_ONE_SECOND;
         for (it=files.begin(); (!expired_file || WantAll) && files.end()!=it; ++it)
         {
             // First, find an eligible file:
@@ -227,7 +227,7 @@ bool ExpiryModuleEE::CompactionFinalizeCallback(
             //  - highest explicit expiry (expiry3) is non-zero and below now
             //  Note:  say file only contained deleted records:  ... still delete file
             //      expiry1 would be ULONG_MAX, expiry2 would be 0, expiry3 would be zero
-            expired_file = (0!=(*it)->expiry1);
+            expired_file = (0!=(*it)->expiry1) && (0!=(*it)->expiry2 || 0!=(*it)->expiry3);
             expired_file = expired_file && (((*it)->expiry2<=aged && 0!=m_ExpiryMinutes)
                                             || 0==(*it)->expiry2);
 
@@ -278,15 +278,17 @@ DBImpl::BackgroundExpiry(
 
     mutex_.AssertHeld();
     assert(NULL != Compact && NULL!=options_.expiry_module.get());
+    assert(NULL != Compact->version());
 
     if (NULL!=Compact && NULL!=options_.expiry_module.get())
     {
         VersionEdit edit;
-        Version* base = versions_->current();
-        base->Ref();
-        options_.expiry_module->CompactionFinalizeCallback(true, *base, Compact->level(),
+        int level(Compact->level());
+
+        // Compact holds a reference count to version()/input_version_
+        const Version* base = Compact->version();
+        options_.expiry_module->CompactionFinalizeCallback(true, *base, level,
                                                            &edit);
-        base->Unref();
         count=edit.DeletedFileCount();
 
         if (s.ok() && shutting_down_.Acquire_Load()) {
@@ -304,8 +306,13 @@ DBImpl::BackgroundExpiry(
         }   // if
 
         // Commit to the new state
-        if (s.ok())
+        if (s.ok() && 0!=count)
         {
+            // get rid of Compact now to potential free
+            //  input version's files
+            delete Compact;
+            Compact=NULL;
+
             DeleteObsoleteFiles();
 
             // release mutex when writing to log file
@@ -313,10 +320,13 @@ DBImpl::BackgroundExpiry(
 
             Log(options_.info_log,
                 "Expired: %zd files from level %d",
-                count, Compact->level());
+                count, level);
             mutex_.Lock();
         }   // if
     }   // if
+
+    // convention in BackgroundCompaction() is to delete Compact here
+    delete Compact;
 
     return s;
 

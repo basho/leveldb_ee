@@ -21,6 +21,7 @@
 // -------------------------------------------------------------------
 
 #include <limits.h>
+#include <algorithm>
 
 #include "util/testharness.h"
 #include "util/testutil.h"
@@ -35,6 +36,8 @@
 #include "db/dbformat.h"
 #include "db/filename.h"
 #include "db/version_set.h"
+#include "port/port.h"
+#include "util/mutexlock.h"
 #include "util/throttle.h"
 
 /**
@@ -181,12 +184,12 @@ TEST(ExpiryTester, MemTableCallback)
     ASSERT_EQ(flag, false);
 
     // explicit, but time in the future
-    after=GetTimeMinutes() + 60*1000000;
+    after=GetTimeMinutes() + 60*port::UINT64_ONE_SECOND;
     InternalKey key3("ExplicitKey", after, 0, kTypeValueExplicitExpiry);
     flag=module.MemTableCallback(key3.internal_key());
     ASSERT_EQ(flag, false);
     // advance the clock
-    SetTimeMinutes(after + 60*1000000);
+    SetTimeMinutes(after + 60*port::UINT64_ONE_SECOND);
     flag=module.MemTableCallback(key3.internal_key());
     ASSERT_EQ(flag, true);
     // disable expiry
@@ -202,10 +205,10 @@ TEST(ExpiryTester, MemTableCallback)
     flag=module.MemTableCallback(key4.internal_key());
     ASSERT_EQ(flag, false);
     // advance the clock
-    SetTimeMinutes(after + 60*1000000);
+    SetTimeMinutes(after + 60*port::UINT64_ONE_SECOND);
     flag=module.MemTableCallback(key4.internal_key());
     ASSERT_EQ(flag, false);
-    SetTimeMinutes(after + 120*1000000);
+    SetTimeMinutes(after + 120*port::UINT64_ONE_SECOND);
     flag=module.MemTableCallback(key4.internal_key());
     ASSERT_EQ(flag, true);
     // disable expiry
@@ -281,7 +284,7 @@ TEST(ExpiryTester, CompactionFinalizeCallback1)
     module.m_ExpiryEnabled=true;
     module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=1;
-    SetTimeMinutes(now + 120*1000000);
+    SetTimeMinutes(now + 120*port::UINT64_ONE_SECOND);
     ver.SetFileList(level, files);
     flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
@@ -292,7 +295,7 @@ TEST(ExpiryTester, CompactionFinalizeCallback1)
     file_ptr->smallest.SetFrom(ParsedInternalKey("GG1", 0, 5, kTypeValue));
     file_ptr->largest.SetFrom(ParsedInternalKey("HH1", 0, 6, kTypeValue));
     file_ptr->expiry1=ULONG_MAX;  // sign of no aged expiry, or plain keys
-    file_ptr->expiry3=now + 60*1000000;
+    file_ptr->expiry3=now + 60*port::UINT64_ONE_SECOND;
     files.push_back(file_ptr);
 
     // disable
@@ -334,8 +337,8 @@ TEST(ExpiryTester, CompactionFinalizeCallback1)
     file_ptr=new FileMetaData;
     file_ptr->smallest.SetFrom(ParsedInternalKey("II1", 0, 7, kTypeValue));
     file_ptr->largest.SetFrom(ParsedInternalKey("JJ1", 0, 8, kTypeValue));
-    file_ptr->expiry1=now - 60*1000000;
-    file_ptr->expiry2=now + 60*1000000;
+    file_ptr->expiry1=now - 60*port::UINT64_ONE_SECOND;
+    file_ptr->expiry2=now + 60*port::UINT64_ONE_SECOND;
     files.push_back(file_ptr);
 
     // disable
@@ -372,39 +375,39 @@ TEST(ExpiryTester, CompactionFinalizeCallback1)
     // file_ptr at 1min, setting at 1m, clock at 30 seconds
     module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=1;
-    SetTimeMinutes(now + 30*1000000);
+    SetTimeMinutes(now + 30*port::UINT64_ONE_SECOND);
     flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
 
     // file_ptr at 1min, setting at 1m, clock at 1.5minutes
     module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=1;
-    SetTimeMinutes(now + 90*1000000);
+    SetTimeMinutes(now + 90*port::UINT64_ONE_SECOND);
     flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
 
     // file_ptr at 1min, setting at 1m, clock at 2minutes
     module.m_WholeFileExpiry=true;
     module.m_ExpiryMinutes=1;
-    SetTimeMinutes(now + 120*1000000);
+    SetTimeMinutes(now + 120*port::UINT64_ONE_SECOND);
     flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, true);
 
     // same settings, but show an explicit expiry too that has not
     //  expired
-    file_ptr->expiry3=now +240*1000000;
+    file_ptr->expiry3=now +240*port::UINT64_ONE_SECOND;
     flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
 
     // same settings, but show an explicit expiry has expired
     //  expired
-    file_ptr->expiry3=now +90*1000000;
+    file_ptr->expiry3=now +90*port::UINT64_ONE_SECOND;
     flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, true);
 
     // same settings, explicit has expired, but not the aged
     //  expired
-    file_ptr->expiry2=now +240*1000000;
+    file_ptr->expiry2=now +240*port::UINT64_ONE_SECOND;
     flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
 
@@ -604,31 +607,9 @@ struct sExpiryTestFile
     // File size is generated
     int m_Number;
     int m_Level;               // level for file in manifest
+    int m_LastValidState;      // in a "state" test, how long should this file be around
     sExpiryTestKey m_Keys[3];  // low, middle, high key
 };
-
-
-sExpiryTestFile Manifest1[]=
-{
-    101, 6, {{"02", eEXPIRY_NONE, 0}, {"05", eEXPIRY_NONE, 0}, {"07", eEXPIRY_NONE, 0}},
-    102, 6, {{"12", eEXPIRY_NONE, 0}, {"15", eEXPIRY_AGED, 25}, {"17", eEXPIRY_AGED, 25}},
-    103, 6, {{"22", eEXPIRY_AGED, 25}, {"25", eEXPIRY_EXPLICIT, 20}, {"27", eEXPIRY_EXPLICIT, 20}},
-    104, 6, {{"32", eEXPIRY_AGED, 25}, {"35", eEXPIRY_AGED, 25}, {"37", eEXPIRY_NONE, 0}},
-    105, 6, {{"42", eEXPIRY_AGED, 25}, {"45", eEXPIRY_NONE, 0}, {"47", eEXPIRY_AGED, 25}},
-
-    201, 5, {{"03", eEXPIRY_AGED, 10}, {"05", eEXPIRY_AGED, 10}, {"06", eEXPIRY_AGED, 10}},
-    202, 5, {{"11", eEXPIRY_NONE, 0}, {"15", eEXPIRY_EXPLICIT, 15}, {"18", eEXPIRY_EXPLICIT, 15}},
-    203, 5, {{"21", eEXPIRY_EXPLICIT, 15}, {"25", eEXPIRY_EXPLICIT, 15}, {"29", eEXPIRY_AGED, 10}},
-    204, 5, {{"34", eEXPIRY_EXPLICIT, 15}, {"35", eEXPIRY_EXPLICIT, 15}, {"39", eEXPIRY_NONE, 0}},
-    205, 5, {{"44", eEXPIRY_EXPLICIT, 15}, {"45", eEXPIRY_NONE, 0}, {"46", eEXPIRY_EXPLICIT, 15}},
-
-    301, 4, {{"03", eEXPIRY_EXPLICIT, 5}, {"05", eEXPIRY_EXPLICIT, 5}, {"06", eEXPIRY_EXPLICIT, 5}},
-    302, 4, {{"11", eEXPIRY_NONE, 0}, {"15", eEXPIRY_AGED, 5}, {"18", eEXPIRY_EXPLICIT, 5}},
-    303, 4, {{"21", eEXPIRY_EXPLICIT, 5}, {"25", eEXPIRY_AGED, 5}, {"29", eEXPIRY_EXPLICIT, 5}},
-    304, 4, {{"34", eEXPIRY_EXPLICIT, 5}, {"35", eEXPIRY_AGED, 5}, {"39", eEXPIRY_NONE, 0}},
-    305, 4, {{"44", eEXPIRY_AGED, 5}, {"45", eEXPIRY_NONE, 0}, {"46", eEXPIRY_EXPLICIT, 5}}
-
-};  // Manifest1
 
 
 class ExpDB : public DBImpl
@@ -643,7 +624,62 @@ public:
     VersionSet * GetVersionSet() {return(versions_);};
     const Options * GetOptions() {return(&options_);};
 
+    void OneCompaction()
+    {
+        MutexLock l(&mutex_);
+        MaybeScheduleCompaction();
+        while (IsCompactionScheduled())
+            bg_cv_.Wait();
+    };  // OneCompaction
+
+    void ShiftClockMinutes(int Min)
+    {
+        uint64_t shift;
+
+        shift=Min * 60 * port::UINT64_ONE_SECOND;
+        SetTimeMinutes(GetTimeMinutes() + shift);
+    };
 };  // class ExpDB
+
+
+class ExpTestModule : public ExpiryModuleEE
+{
+public:
+    ExpTestModule() : m_ExpiryAllow(0), m_AllowLevel(-1) {};
+
+    mutable int m_ExpiryAllow;
+    mutable int m_AllowLevel;
+
+    virtual bool CompactionFinalizeCallback(
+        bool WantAll, const Version & Ver, int Level,
+        VersionEdit * Edit) const
+    {
+        bool flag(false);
+
+        if (0!=m_ExpiryAllow && NULL==Edit)
+        {
+            flag=ExpiryModuleEE::CompactionFinalizeCallback(WantAll, Ver, Level, Edit);
+
+            if (flag)
+            {
+                m_AllowLevel=Level;
+                -- m_ExpiryAllow;
+            }   // if
+        }   // if
+        else if (-1!=m_AllowLevel && NULL!=Edit)
+        {
+            flag=ExpiryModuleEE::CompactionFinalizeCallback(WantAll, Ver, Level, Edit);
+
+            if (flag)
+            {
+                m_AllowLevel=-1;
+            }
+        }   // else if
+
+        return(flag);
+
+    }   // CoompactionFinalizeCallback
+};
 
 
 class ExpiryManifestTester
@@ -660,7 +696,8 @@ public:
 
         m_Options.create_if_missing=true;
         m_Options.error_if_exists=false;
-        m_Options.expiry_module=new ExpiryModuleEE;
+        m_Expiry=new ExpTestModule;
+        m_Options.expiry_module=m_Expiry;
 
         OpenTestDB();
     };
@@ -675,6 +712,7 @@ public:
     bool m_Good;
     std::string m_DBName;
     Options m_Options;
+    ExpTestModule * m_Expiry;
     Env * m_Env;
     ExpDB * m_DB;
     uint64_t m_BaseTime;
@@ -703,12 +741,12 @@ public:
                 break;
 
             case(eEXPIRY_AGED):
-                expiry=m_BaseTime - Key.m_NowMinus;
+                expiry=m_BaseTime - Key.m_NowMinus * 60 * port::UINT64_ONE_SECOND;
                 type=kTypeValueWriteTime;
                 break;
 
             case(eEXPIRY_EXPLICIT):
-                expiry=m_BaseTime + Key.m_NowMinus;
+                expiry=m_BaseTime + Key.m_NowMinus * 60 * port::UINT64_ONE_SECOND;
                 type=kTypeValueExplicitExpiry;
                 break;
         }   // switch
@@ -838,7 +876,7 @@ public:
                         break;
 
                     case eEXPIRY_AGED:
-                        expires=m_BaseTime - cursor->m_Keys[loop1].m_NowMinus;
+                        expires=m_BaseTime - cursor->m_Keys[loop1].m_NowMinus * 60 * port::UINT64_ONE_SECOND;
                         if (expires<expiry1)
                             expiry1=expires;
                         if (expiry2<expires)
@@ -846,7 +884,7 @@ public:
                         break;
 
                     case eEXPIRY_EXPLICIT:
-                        expires=m_BaseTime + cursor->m_Keys[loop1].m_NowMinus;
+                        expires=m_BaseTime + cursor->m_Keys[loop1].m_NowMinus * 60 * port::UINT64_ONE_SECOND;
                         if (expiry3<expires)
                             expiry3=expires;
                         break;
@@ -866,8 +904,74 @@ public:
 
     }   // VerifyManifest
 
+    void VerifyFiles(const sExpiryTestFile * Files, size_t Count, int State)
+    {
+        int current_level, loop, loop1;
+        std::vector<std::string> file_names;
+        std::vector<std::string>::iterator f_it;
+
+        std::string dir_name, target;
+        const sExpiryTestFile * cursor;
+
+        current_level=-1;
+
+        for (cursor=Files, loop=0; loop<Count; ++loop, ++cursor)
+        {
+            if (cursor->m_Level!=current_level)
+            {
+                // should be no files left in list upon level change
+                //   (except "." and "..")
+                ASSERT_LE(file_names.size(), 2);
+                file_names.clear();
+
+                current_level=cursor->m_Level;
+                dir_name=MakeDirName2(*m_DB->GetOptions(), current_level, "sst");
+                m_Env->GetChildren(dir_name, &file_names);
+            }   // if
+
+            // is file still found on disk?
+            if (State <= cursor->m_LastValidState)
+            {
+                // -2 omits directory
+                target=TableFileName(*m_DB->GetOptions(), cursor->m_Number, -2);
+                target.erase(0,target.find_last_of('/')+1);
+                f_it=std::find(file_names.begin(), file_names.end(), target);
+                ASSERT_TRUE(file_names.end()!=f_it);
+                file_names.erase(f_it);
+            }   // if
+        }   // for
+
+        // verify last populated level was good
+        ASSERT_LE(file_names.size(), 2);
+
+        return;
+
+    }   // VerifyManifest
+
 };  // ExpiryManifestTester
 
+
+sExpiryTestFile Manifest1[]=
+{
+    101, 6, 0, {{"02", eEXPIRY_NONE, 0}, {"05", eEXPIRY_NONE, 0}, {"07", eEXPIRY_NONE, 0}},
+    102, 6, 0, {{"12", eEXPIRY_NONE, 0}, {"15", eEXPIRY_AGED, 25}, {"17", eEXPIRY_AGED, 25}},
+    103, 6, 0, {{"22", eEXPIRY_AGED, 25}, {"25", eEXPIRY_EXPLICIT, 20}, {"27", eEXPIRY_EXPLICIT, 20}},
+    104, 6, 0, {{"32", eEXPIRY_AGED, 25}, {"35", eEXPIRY_AGED, 25}, {"37", eEXPIRY_NONE, 0}},
+    105, 6, 0, {{"42", eEXPIRY_AGED, 25}, {"45", eEXPIRY_NONE, 0}, {"47", eEXPIRY_AGED, 25}},
+
+    201, 5, 0, {{"03", eEXPIRY_AGED, 10}, {"05", eEXPIRY_AGED, 10}, {"06", eEXPIRY_AGED, 10}},
+    202, 5, 0, {{"11", eEXPIRY_NONE, 0}, {"15", eEXPIRY_EXPLICIT, 15}, {"18", eEXPIRY_EXPLICIT, 15}},
+    203, 5, 0, {{"21", eEXPIRY_EXPLICIT, 15}, {"25", eEXPIRY_EXPLICIT, 15}, {"29", eEXPIRY_AGED, 10}},
+    204, 5, 0, {{"34", eEXPIRY_EXPLICIT, 15}, {"35", eEXPIRY_EXPLICIT, 15}, {"39", eEXPIRY_NONE, 0}},
+    205, 5, 0, {{"44", eEXPIRY_EXPLICIT, 15}, {"45", eEXPIRY_NONE, 0}, {"46", eEXPIRY_EXPLICIT, 15}},
+
+    301, 4, 0, {{"03", eEXPIRY_EXPLICIT, 5}, {"05", eEXPIRY_EXPLICIT, 5}, {"06", eEXPIRY_EXPLICIT, 5}},
+    302, 4, 0, {{"11", eEXPIRY_NONE, 0}, {"15", eEXPIRY_AGED, 5}, {"18", eEXPIRY_EXPLICIT, 5}},
+    303, 4, 0, {{"21", eEXPIRY_EXPLICIT, 5}, {"25", eEXPIRY_AGED, 5}, {"29", eEXPIRY_EXPLICIT, 5}},
+    304, 4, 0, {{"34", eEXPIRY_EXPLICIT, 5}, {"35", eEXPIRY_AGED, 5}, {"39", eEXPIRY_NONE, 0}},
+    305, 4, 0, {{"44", eEXPIRY_AGED, 5}, {"45", eEXPIRY_NONE, 0}, {"46", eEXPIRY_EXPLICIT, 5}}
+
+};  // Manifest1
 
 /**
  * Does manifest create correctly?
@@ -875,12 +979,6 @@ public:
 TEST(ExpiryManifestTester, Manifest1)
 {
     size_t manifest_count;
-    const Version::FileMetaDataVector_t * file_list;
-    Version::FileMetaDataVector_t::const_iterator it;
-    int current_level, loop, loop1;
-    const sExpiryTestFile * cursor;
-    InternalKey low_key, mid_key, high_key;
-    uint64_t expiry1, expiry2, expiry3, expires;
     Status s;
 
     manifest_count=sizeof(Manifest1) / sizeof(Manifest1[0]);
@@ -912,6 +1010,129 @@ TEST(ExpiryManifestTester, Manifest1)
 
     return;
 };
+
+
+sExpiryTestFile Overlap1[]=
+{
+    // sorted levels
+    101, 6, 5, {{"02", eEXPIRY_NONE, 0}, {"05", eEXPIRY_NONE, 0}, {"07", eEXPIRY_NONE, 0}},
+    102, 6, 2, {{"15", eEXPIRY_AGED, 25}, {"17", eEXPIRY_AGED, 25}, {"20", eEXPIRY_AGED, 25}},
+
+    201, 5, 5, {{"22", eEXPIRY_NONE, 0}, {"24", eEXPIRY_NONE, 0}, {"25", eEXPIRY_NONE, 0}},
+
+    301, 4, 5, {{"06", eEXPIRY_EXPLICIT, 5}, {"07", eEXPIRY_EXPLICIT, 5}, {"10", eEXPIRY_EXPLICIT, 5}},
+    302, 4, 0, {{"35", eEXPIRY_EXPLICIT, 5}, {"37", eEXPIRY_EXPLICIT, 5}, {"40", eEXPIRY_EXPLICIT, 5}},
+
+    401, 3, 5, {{"45", eEXPIRY_NONE, 0}, {"46", eEXPIRY_NONE, 0}, {"47", eEXPIRY_NONE, 0}},
+
+    450, 2, 3, {{"11", eEXPIRY_AGED, 25}, {"17", eEXPIRY_AGED, 25}, {"21", eEXPIRY_AGED, 25}},
+
+    // Overlap levels
+    501, 1, 5, {{"10", eEXPIRY_AGED, 25}, {"17", eEXPIRY_AGED, 25}, {"23", eEXPIRY_AGED, 25}},
+    502, 1, 5, {{"11", eEXPIRY_NONE, 0}, {"12", eEXPIRY_NONE, 0}, {"15", eEXPIRY_NONE, 0}},
+    503, 1, 1, {{"33", eEXPIRY_AGED, 25}, {"34", eEXPIRY_AGED, 25}, {"42", eEXPIRY_AGED, 25}}
+
+
+};
+
+
+/*
+ * Test sequence that expired files get selected
+ */
+TEST(ExpiryManifestTester, Overlap1)
+{
+    size_t manifest_count;
+    Status s;
+
+    manifest_count=sizeof(Overlap1) / sizeof(Overlap1[0]);
+    CreateManifest(Overlap1, manifest_count);
+
+    // quick verify
+    ASSERT_EQ(m_DB->GetVersionSet()->NumLevelFiles(6), 2);
+    ASSERT_EQ(m_DB->GetVersionSet()->NumLevelFiles(5), 1);
+    ASSERT_EQ(m_DB->GetVersionSet()->NumLevelFiles(4), 2);
+    ASSERT_EQ(m_DB->GetVersionSet()->NumLevelFiles(3), 1);
+    ASSERT_EQ(m_DB->GetVersionSet()->NumLevelFiles(2), 1);
+    ASSERT_EQ(m_DB->GetVersionSet()->NumLevelFiles(1), 3);
+    ASSERT_EQ(m_DB->GetVersionSet()->NumLevelFiles(0), 0);
+
+    // full verify
+    VerifyManifest(Overlap1, manifest_count);
+    VerifyFiles(Overlap1, manifest_count, 0);
+
+    // enable compaction expiry
+    m_Expiry->m_ExpiryEnabled=true;
+    m_Expiry->m_ExpiryMinutes=60;
+    m_Expiry->m_WholeFileExpiry=true;
+
+    m_DB->ShiftClockMinutes(10);
+    m_Expiry->m_ExpiryAllow=1;
+    m_DB->OneCompaction();
+    VerifyFiles(Overlap1, manifest_count, 1);
+
+    // total shift now 30 min
+    m_DB->ShiftClockMinutes(30);
+    m_Expiry->m_ExpiryAllow=1;
+    m_DB->OneCompaction();
+    VerifyFiles(Overlap1, manifest_count, 2);
+
+    m_Expiry->m_ExpiryAllow=1;
+    m_DB->OneCompaction();
+    VerifyFiles(Overlap1, manifest_count, 3);
+
+    m_Expiry->m_ExpiryAllow=1;
+    m_DB->OneCompaction();
+    VerifyFiles(Overlap1, manifest_count, 4);
+
+    m_Expiry->m_ExpiryAllow=1;
+    m_DB->OneCompaction();
+    VerifyFiles(Overlap1, manifest_count, 5);
+
+    return;
+};
+
+
+/*
+ * Test compaction will find all without prompting
+ */
+TEST(ExpiryManifestTester, Overlap2)
+{
+    size_t manifest_count;
+    Status s;
+
+    manifest_count=sizeof(Overlap1) / sizeof(Overlap1[0]);
+    CreateManifest(Overlap1, manifest_count);
+
+    // quick verify
+    ASSERT_EQ(m_DB->GetVersionSet()->NumLevelFiles(6), 2);
+    ASSERT_EQ(m_DB->GetVersionSet()->NumLevelFiles(5), 1);
+    ASSERT_EQ(m_DB->GetVersionSet()->NumLevelFiles(4), 2);
+    ASSERT_EQ(m_DB->GetVersionSet()->NumLevelFiles(3), 1);
+    ASSERT_EQ(m_DB->GetVersionSet()->NumLevelFiles(2), 1);
+    ASSERT_EQ(m_DB->GetVersionSet()->NumLevelFiles(1), 3);
+    ASSERT_EQ(m_DB->GetVersionSet()->NumLevelFiles(0), 0);
+
+    // full verify
+    VerifyManifest(Overlap1, manifest_count);
+    VerifyFiles(Overlap1, manifest_count, 0);
+
+    // enable compaction expiry
+    m_Expiry->m_ExpiryEnabled=true;
+    m_Expiry->m_ExpiryMinutes=60;
+    m_Expiry->m_WholeFileExpiry=true;
+    m_DB->ShiftClockMinutes(30);
+
+    m_Expiry->m_ExpiryAllow=10;
+    m_DB->OneCompaction();
+
+    // let multiple threads complete
+    sleep(1);
+    VerifyFiles(Overlap1, manifest_count, 5);
+
+    return;
+};
+
+
 
 
 }  // namespace leveldb
