@@ -30,6 +30,7 @@
 #include "leveldb/env.h"
 #include "leveldb/options.h"
 #include "leveldb/slice.h"
+#include "leveldb/write_batch.h"
 #include "leveldb_ee/expiry_ee.h"
 
 #include "db/db_impl.h"
@@ -439,6 +440,19 @@ struct TestFileMetaData
 
 
 static void
+ClearMetaArray(
+    Version::FileMetaDataVector_t & ClearMe)
+{
+    // clean up phony files or Version destructor will crash
+    std::vector<FileMetaData*>::iterator it;
+    for (it=ClearMe.begin(); ClearMe.end()!=it; ++it)
+        delete (*it);
+    ClearMe.clear();
+
+}   // ClearMetaArray
+
+
+static void
 CreateMetaArray(
     Version::FileMetaDataVector_t & Output,
     TestFileMetaData * Data,
@@ -449,7 +463,7 @@ CreateMetaArray(
     FileMetaData * file_ptr;
     ExpiryTime now;
 
-    Output.clear();
+    ClearMetaArray(Output);
     now=GetTimeMinutes();
 
     for (loop=0, cursor=Data; loop<Count; ++loop, ++cursor)
@@ -476,19 +490,6 @@ CreateMetaArray(
     }   // for
 
 }   // CreateMetaArray
-
-
-static void
-ClearMetaArray(
-    Version::FileMetaDataVector_t & ClearMe)
-{
-    // clean up phony files or Version destructor will crash
-    std::vector<FileMetaData*>::iterator it;
-    for (it=ClearMe.begin(); ClearMe.end()!=it; ++it)
-        delete (*it);
-    ClearMe.clear();
-
-}   // ClearMetaArray
 
 
 /** case: two levels, no overlap, no expiry **/
@@ -580,8 +581,8 @@ TEST(ExpiryTester, OverlapTests)
     ver.SetFileList(sorted0, level_clear);
     ver.SetFileList(sorted1, level_clear);
 
-
-
+    ClearMetaArray(level1);
+    ClearMetaArray(level2);
 
 }   // OverlapTests
 
@@ -612,12 +613,18 @@ struct sExpiryTestFile
 };
 
 
+/**
+ * Note:  constructor and destructor NOT called, this is
+ *        an interface class only
+ */
+
 class ExpDB : public DBImpl
 {
 public:
     ExpDB(const Options& options, const std::string& dbname)
-        : DBImpl(options, dbname)
-        {};
+        : DBImpl(options, dbname) {}
+
+
 
     virtual ~ExpDB() {};
 
@@ -631,6 +638,9 @@ public:
         while (IsCompactionScheduled())
             bg_cv_.Wait();
     };  // OneCompaction
+
+    void SetClock(uint64_t Time)
+        {SetTimeMinutes(Time);};
 
     void ShiftClockMinutes(int Min)
     {
@@ -723,8 +733,10 @@ public:
         leveldb::Status status;
 
         status=leveldb::DB::Open(m_Options, m_DBName, (DB**)&m_DB);
+
         m_Good=status.ok();
         ASSERT_OK(status);
+        m_DB->SetClock(m_BaseTime);
     }   // OpenTestDB
 
 
@@ -948,6 +960,35 @@ public:
 
     }   // VerifyManifest
 
+
+    void VerifyKeys(const sExpiryTestKey * Key, size_t Count, int Minutes)
+    {
+        Iterator * it;
+        const sExpiryTestKey * cursor;
+        int loop;
+
+        it=m_DB->NewIterator(ReadOptions());
+        it->SeekToFirst();
+
+        for (cursor=Key, loop=0; loop<Count; ++cursor, ++loop)
+        {
+
+            if ( (eEXPIRY_EXPLICIT == cursor->m_Type && Minutes <= cursor->m_NowMinus)
+                 || (eEXPIRY_AGED == cursor->m_Type && Minutes<m_Expiry->m_ExpiryMinutes))
+            {
+                ASSERT_TRUE(it->Valid());
+                ASSERT_TRUE(0==strcmp(cursor->m_Key, it->key().ToString().c_str()));
+                it->Next();
+            }   // if
+        }   // for
+
+        delete it;
+
+        return;
+
+    }   // VerifyKeys
+
+
 };  // ExpiryManifestTester
 
 
@@ -1120,19 +1161,107 @@ TEST(ExpiryManifestTester, Overlap2)
     m_Expiry->m_ExpiryEnabled=true;
     m_Expiry->m_ExpiryMinutes=60;
     m_Expiry->m_WholeFileExpiry=true;
-    m_DB->ShiftClockMinutes(30);
+    m_DB->ShiftClockMinutes(61);
 
     m_Expiry->m_ExpiryAllow=10;
     m_DB->OneCompaction();
 
     // let multiple threads complete
-    sleep(1);
+//    sleep(1);
     VerifyFiles(Overlap1, manifest_count, 5);
 
     return;
 };
 
 
+sExpiryTestKey Compact1[]=
+{
+    {"01", eEXPIRY_AGED, 0},
+    {"02", eEXPIRY_EXPLICIT, 35},
+    {"03", eEXPIRY_AGED, 0},
+    {"04", eEXPIRY_EXPLICIT, 55},
+    {"05", eEXPIRY_AGED, 0},
+    {"06", eEXPIRY_EXPLICIT, 15},
+    {"07", eEXPIRY_AGED, 0},
+    {"08", eEXPIRY_EXPLICIT, 5},
+    {"09", eEXPIRY_AGED, 0},
+    {"10", eEXPIRY_EXPLICIT, 55},
+    {"11", eEXPIRY_AGED, 0},
+    {"12", eEXPIRY_EXPLICIT, 65},
+    {"13", eEXPIRY_AGED, 0}
+
+};
+
+
+/*
+ * Test expiry records get filtered during regular compaction
+ *  (and expiring all leads to file deletion)
+ */
+TEST(ExpiryManifestTester, Compact1)
+{
+    size_t key_count;
+    const sExpiryTestKey * Key;
+    Status s;
+    WriteBatch batch;
+    KeyMetaData meta;
+    int loop;
+    ExpiryTime expiry;
+    ValueType type;
+
+    // enable compaction expiry
+    m_Expiry->m_ExpiryEnabled=true;
+    m_Expiry->m_ExpiryMinutes=30;
+    m_Expiry->m_WholeFileExpiry=false;
+
+    key_count=sizeof(Compact1) / sizeof(Compact1[0]);
+
+    for (loop=0, Key=Compact1; loop<key_count; ++loop, ++Key)
+    {
+        switch(Key->m_Type)
+        {
+            case(eEXPIRY_NONE):
+                expiry=0;
+                type=kTypeValue;
+                break;
+
+            case(eEXPIRY_AGED):
+                expiry=m_BaseTime - Key->m_NowMinus * 60 * port::UINT64_ONE_SECOND;
+                type=kTypeValueWriteTime;
+                break;
+
+            case(eEXPIRY_EXPLICIT):
+                expiry=m_BaseTime + Key->m_NowMinus * 60 * port::UINT64_ONE_SECOND;
+                type=kTypeValueExplicitExpiry;
+                break;
+        }   // switch
+
+        meta.m_Type=type;
+        meta.m_Expiry=expiry;
+        s=m_DB->Put(WriteOptions(), Key->m_Key, "gig\'em", &meta);
+        ASSERT_OK(s);
+    }   // for
+
+    // load seem ok?
+    VerifyKeys(Compact1, key_count, 0);
+
+    // move write buffer to .sst file
+    //  (no expiry in buffer to .sst conversion)
+    m_DB->TEST_CompactMemTable();
+    VerifyKeys(Compact1, key_count, 0);
+
+    m_DB->ShiftClockMinutes(20);
+    m_DB->TEST_CompactRange(3, NULL, NULL);
+    VerifyKeys(Compact1, key_count, 20);
+
+    m_DB->ShiftClockMinutes(16);
+    m_DB->TEST_CompactRange(4, NULL, NULL);
+    VerifyKeys(Compact1, key_count, 36);
+
+    m_DB->ShiftClockMinutes(35);
+    m_DB->TEST_CompactRange(5, NULL, NULL);
+    VerifyKeys(Compact1, key_count, 71);
+
+}   // Compact1
 
 
 }  // namespace leveldb
