@@ -38,9 +38,9 @@ void
 ExpiryModuleEE::Dump(
     Logger * log) const
 {
-    Log(log," ExpiryModuleEE.expiry_enabled: %s", m_ExpiryEnabled ? "true" : "false");
-    Log(log," ExpiryModuleEE.expiry_minutes: %" PRIu64, m_ExpiryMinutes);
-    Log(log,"    ExpiryModuleEE.whole_files: %s", m_WholeFileExpiry ? "true" : "false");
+    Log(log," ExpiryModuleEE.expiry_enabled: %s", expiry_enabled ? "true" : "false");
+    Log(log," ExpiryModuleEE.expiry_minutes: %" PRIu64, expiry_minutes);
+    Log(log,"    ExpiryModuleEE.whole_files: %s", whole_file_expiry ? "true" : "false");
 
     return;
 
@@ -58,7 +58,7 @@ bool ExpiryModuleEE::MemTableInserterCallback(
     // only update the expiry time if explicit type
     //  without expiry, or ExpiryMinutes set
     if ((kTypeValueWriteTime==ValType && 0==Expiry)
-        || (kTypeValue==ValType && 0!=m_ExpiryMinutes && m_ExpiryEnabled))
+        || (kTypeValue==ValType && 0!=expiry_minutes && expiry_enabled))
     {
         ValType=kTypeValueWriteTime;
         Expiry=GetTimeMinutes();
@@ -79,7 +79,7 @@ bool ExpiryModuleEE::KeyRetirementCallback(
     bool is_expired(false);
     uint64_t now, expires;
 
-    if (m_ExpiryEnabled)
+    if (expiry_enabled)
     {
         switch(Ikey.type)
         {
@@ -90,10 +90,10 @@ bool ExpiryModuleEE::KeyRetirementCallback(
                 break;
 
             case kTypeValueWriteTime:
-                if (0!=m_ExpiryMinutes && 0!=Ikey.expiry)
+                if (0!=expiry_minutes && 0!=Ikey.expiry)
                 {
                     now=GetTimeMinutes();
-                    expires=m_ExpiryMinutes*60*port::UINT64_ONE_SECOND + Ikey.expiry;
+                    expires=expiry_minutes*60*port::UINT64_ONE_SECOND + Ikey.expiry;
                     is_expired=(expires<=now);
                 }   // if
                 break;
@@ -151,7 +151,7 @@ bool ExpiryModuleEE::TableBuilderCallback(
                 Counters.Set(eSstCountExpiry2, expires);
             // add to delete count if expired already
             //   i.e. acting as a tombstone
-            if (0!=m_ExpiryMinutes && MemTableCallback(Key))
+            if (0!=expiry_minutes && MemTableCallback(Key))
                 Counters.Inc(eSstCountDeleteKey);
             break;
 
@@ -160,7 +160,7 @@ bool ExpiryModuleEE::TableBuilderCallback(
                 Counters.Set(eSstCountExpiry3, expires);
             // add to delete count if expired already
             //   i.e. acting as a tombstone
-            if (0!=m_ExpiryMinutes && MemTableCallback(Key))
+            if (0!=expiry_minutes && MemTableCallback(Key))
                 Counters.Inc(eSstCountDeleteKey);
             break;
 
@@ -207,17 +207,18 @@ bool ExpiryModuleEE::CompactionFinalizeCallback(
     int Level,                     // input: level to review for expiry
     VersionEdit * Edit) const      // output: NULL or destination of delete list
 {
-    bool expired_file(false);
+    bool ret_flag(false);
 
-    if (m_ExpiryEnabled && m_WholeFileExpiry)
+    if (expiry_enabled && whole_file_expiry)
     {
+        bool expired_file(false);
         ExpiryTime now, aged;
         const std::vector<FileMetaData*> & files(Ver.GetFileList(Level));
         std::vector<FileMetaData*>::const_iterator it;
         size_t old_index[config::kNumLevels];
 
         now=GetTimeMinutes();
-        aged=now - m_ExpiryMinutes*60*port::UINT64_ONE_SECOND;
+        aged=now - expiry_minutes*60*port::UINT64_ONE_SECOND;
         for (it=files.begin(); (!expired_file || WantAll) && files.end()!=it; ++it)
         {
             // First, find an eligible file:
@@ -228,7 +229,7 @@ bool ExpiryModuleEE::CompactionFinalizeCallback(
             //  Note:  say file only contained deleted records:  ... still delete file
             //      expiry1 would be ULONG_MAX, expiry2 would be 0, expiry3 would be zero
             expired_file = (0!=(*it)->expiry1) && (0!=(*it)->expiry2 || 0!=(*it)->expiry3);
-            expired_file = expired_file && (((*it)->expiry2<=aged && 0!=m_ExpiryMinutes)
+            expired_file = expired_file && (((*it)->expiry2<=aged && 0!=expiry_minutes)
                                             || 0==(*it)->expiry2);
 
             expired_file = expired_file && (0==(*it)->expiry3
@@ -250,6 +251,7 @@ bool ExpiryModuleEE::CompactionFinalizeCallback(
                     expired_file=!Ver.OverlapInLevel(test, &small,
                                                      &large);
                 }   // for
+                ret_flag=ret_flag || expired_file;
             }   // if
 
             // expired_file and no overlap? mark it for delete
@@ -260,7 +262,7 @@ bool ExpiryModuleEE::CompactionFinalizeCallback(
         }   // for
     }   // if
 
-    return(expired_file);
+    return(ret_flag);
 
 }   // ExpiryModuleEE::CompactionFinalizeCallback
 

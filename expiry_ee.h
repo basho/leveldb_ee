@@ -38,7 +38,7 @@ class ExpiryModuleEE : public ExpiryModule
 {
 public:
     ExpiryModuleEE()
-        : m_ExpiryEnabled(false), m_ExpiryMinutes(0), m_WholeFileExpiry(false)
+        : expiry_enabled(false), expiry_minutes(0), whole_file_expiry(false)
     {};
 
     ~ExpiryModuleEE() {};
@@ -81,21 +81,24 @@ public:
         VersionEdit * Edit) const;     // output: NULL or destination of delete list
 
 public:
+    // NOTE: option names below are intentionally public and lowercase with underscores.
+    //       This is to match style of options within include/leveldb/options.h.
+
     // Riak specific option to enable/disable expiry features globally
     //  true: expiry enabled
     //  false: disabled (some expired keys may reappear)
-    bool m_ExpiryEnabled;
+    bool expiry_enabled;
 
     // Riak specific option giving number of minutes a stored key/value
     // may stay within the database before automatic deletion.  Zero
     // disables expiry by age feature.
-    uint64_t m_ExpiryMinutes;
+    uint64_t expiry_minutes;
 
     // configuration values
     // Riak specific option authorizing leveldb to eliminate entire
     // files that contain expired data (delete files instead of
     // removing expired data during compactions).
-    bool m_WholeFileExpiry;
+    bool whole_file_expiry;
 
 };  // ExpiryModule
 
