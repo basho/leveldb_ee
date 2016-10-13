@@ -61,7 +61,8 @@ public:
                       DoubleCache & doublecache, TestFileInfoMap_t & Map)
         : TableCache(dbname, options, file_cache, doublecache), m_Map(Map)  {};
 
-    virtual Status FindTable(uint64_t file_number, uint64_t file_size, int level, Cache::Handle**, bool is_compaction=false)
+    virtual Status FindTable(uint64_t file_number, uint64_t file_size, int level,
+                             Cache::Handle**, bool is_compaction=false, bool for_iterator=true)
     {
         TestFileInfo info;
         info.m_FileNum=file_number;
