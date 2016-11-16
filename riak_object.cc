@@ -54,8 +54,8 @@ const Binary32_t cOKeyPrefix={{0x0c, 0xb7, 0x80, 0x08}};  // atom tag and 'o' at
 const Binary16_t cRiakObjV1={{0x35, 1}};
 
 // Erlang 2 tuple prefix
-const Binary16_t cTwoTuplePrefix{{0x68, 0x02}};
-const Binary16_t cStringPrefix{{0x6b, 0x00}};
+const Binary16_t cTwoTuplePrefix={{0x68, 0x02}};
+const Binary16_t cStringPrefix={{0x6b, 0x00}};
 
 //struct RiakV1
 
@@ -63,6 +63,18 @@ static bool SiblingGetLastModTime(
     const uint8_t * &Cursor,
     const uint8_t * Limit,
     uint64_t & ModTime);
+
+static bool FindDictionaryEntry(
+    const char * Key,
+    uint32_t KeyLen,
+    const uint8_t * &Cursor, // start of sibling, output set to next sibling
+    const uint8_t * Limit);  // overrun test
+
+static bool FindMetaEntry(
+    const char * Key,
+    uint32_t KeyLen,
+    const uint8_t * &Cursor, // start of sibling, output set to next sibling
+    const uint8_t * Limit);  // overrun test
 
 static bool GetBinaryLength(const uint8_t * Cursor,
                             const uint8_t * Limit,
@@ -110,15 +122,20 @@ KeyGetBucket(
             {
                 cursor+=sizeof(uint32_t);
 
-                // 16 is tuple tag, size 2, first tuple is binary tag 18: bucket type, bucket
+                // second tuple is a tuple. its first tuple is binary tag 18: bucket type, bucket
                 if ((cursor+5)<key_end && 16==*cursor && 2==*(cursor+4) && 18==*(cursor+5))
                 {
-                    cursor+=5;
+                    // shift cursor to first char of binary
+                    cursor+=6;
                     if (GetBinaryLength(cursor, key_end, length))
                     {
                         BucketType.resize(length);
                         ret_flag=GetBinary(cursor, key_end, (uint8_t *)BucketType.data());
 
+                        // test for binary (bucket name)
+                        ret_flag=(ret_flag && cursor<key_end && 18==*cursor);
+
+                        ++cursor;
                         if (ret_flag && GetBinaryLength(cursor, key_end, length))
                         {
                             Bucket.resize(length);
@@ -391,7 +408,7 @@ FindMetaEntry(
     if (good)
     {
         meta_len=ntohl(*(uint32_t *)Cursor);
-        meta_limit=Cursor+meta_limit;
+        meta_limit=Cursor+meta_len;
         Cursor+=sizeof(uint32_t);
     }   // if
 
