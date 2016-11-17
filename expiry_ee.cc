@@ -75,7 +75,7 @@ bool ExpiryModuleOS::MemTableInserterCallback(
         ValType=kTypeValueWriteTime;
 
         if (ValueGetLastModTime(Value, mod_micros))
-            Expiry=mod_micros / 60000000;
+            Expiry=mod_micros;
         else
             Expiry=GetTimeMinutes();
     }   // if
