@@ -30,6 +30,7 @@
 #include "db/db_impl.h"
 #include "db/version_set.h"
 #include "leveldb_ee/expiry_ee.h"
+#include "leveldb_ee/riak_object.h"
 #include "util/logging.h"
 #include "util/throttle.h"
 
@@ -60,6 +61,7 @@ bool ExpiryModuleOS::MemTableInserterCallback(
     const
 {
     bool good(true);
+    uint64_t mod_micros;
 
     // only update the expiry time if explicit type
     //  without expiry, OR ExpiryMinutes set and not internal key
@@ -71,7 +73,11 @@ bool ExpiryModuleOS::MemTableInserterCallback(
                 || 0!=memcmp(lRiakMetaDataKey,Key.data(),lRiakMetaDataKeyLen))))
     {
         ValType=kTypeValueWriteTime;
-        Expiry=GetTimeMinutes();
+
+        if (ValueGetLastModTime(Value, mod_micros))
+            Expiry=mod_micros / 60000000;
+        else
+            Expiry=GetTimeMinutes();
     }   // if
 
     return(good);
