@@ -301,7 +301,7 @@ SiblingGetLastModTime(
         {
             // find entry, see if cursor updated to string header
             //  25 is length of string
-            if (FindMetaEntry("X-Riak-Meta-ExpiryBaseSec", 25, cursor, Limit)
+            if (FindMetaEntry("X-Riak-Meta-Expiry-Base-Sec", 27, cursor, Limit)
                 && 0x6b==*cursor && (cursor+3)<Limit)
             {
                 uint64_t temp;
@@ -334,7 +334,8 @@ SiblingGetLastModTime(
                 // look useful: 1980-01-01 < temp < 2080-01-01
                 if (315550800 < temp && temp < 3471310800 && cursor<Limit)
                 {
-                    ModTime=temp;
+                    // ModTime in microseconds
+                    ModTime=temp*1000000;
                     ret_flag=true;
                 }   // if
             }   // if
@@ -436,14 +437,14 @@ FindMetaEntry(
     {
         // element should be a two element tuple
         //  (element NIL_EXT will be last in list and fail prefix test)
-        temp16=ntohs(*(uint16_t *)Cursor);
+        temp16=*(uint16_t *)Cursor;
         Cursor+=sizeof(uint16_t);
         good=cTwoTuplePrefix.m_Uint16==temp16 && (Cursor+2)<meta_limit;
 
         // decode "key"
         if (good)
         {
-            temp16=ntohs(*(uint16_t *)Cursor);
+            temp16=*(uint16_t *)Cursor;
             Cursor+=sizeof(uint16_t);
             good=cStringPrefix.m_Uint16==temp16 && (Cursor+2)<meta_limit;
 
@@ -463,7 +464,7 @@ FindMetaEntry(
         // skip over value if wrong key
         if (good && !ret_flag)
         {
-            temp16=ntohs(*(uint16_t *)Cursor);
+            temp16=*(uint16_t *)Cursor;
             Cursor+=sizeof(uint16_t);
             good=cStringPrefix.m_Uint16==temp16 && (Cursor+2)<meta_limit;
 
@@ -473,6 +474,7 @@ FindMetaEntry(
             else
                 key_len=0;
             Cursor+=(1+key_len);
+            --list_len;
         }   // if
     }   // while
 
