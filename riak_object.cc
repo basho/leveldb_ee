@@ -300,8 +300,8 @@ SiblingGetLastModTime(
         if (FindDictionaryEntry("X-Riak-Meta", 11, cursor, Limit))
         {
             // find entry, see if cursor updated to string header
-            //  25 is length of string
-            if (FindMetaEntry("X-Riak-Meta-Expiry-Base-Sec", 27, cursor, Limit)
+            //  31 is length of string
+            if (FindMetaEntry("X-Riak-Meta-Expiry-Base-Seconds", 31, cursor, Limit)
                 && 0x6b==*cursor && (cursor+3)<Limit)
             {
                 uint64_t temp;
