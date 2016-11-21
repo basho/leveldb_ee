@@ -1,6 +1,6 @@
 // -------------------------------------------------------------------
 //
-// expiry_ee.h
+// riak_object.h
 //
 // Copyright (c) 2016 Basho Technologies, Inc. All Rights Reserved.
 //
@@ -20,38 +20,20 @@
 //
 // -------------------------------------------------------------------
 
-#ifndef EXPIRY_EE_H
-#define EXPIRY_EE_H
+#ifndef RIAK_OBJECT_H
+#define RIAK_OBJECT_H
 
-#include <vector>
+#include <string>
+#include <stdint.h>
 
-#include "leveldb/options.h"
-#include "leveldb/expiry.h"
-#include "leveldb/perf_count.h"
-#include "db/dbformat.h"
-#include "db/version_edit.h"
-#include "util/expiry_os.h"
+#include "leveldb/slice.h"
+
 
 namespace leveldb
 {
+    bool KeyGetBucket(Slice & Key, std::string & BucketType, std::string & Bucket);
 
-class ExpiryModuleEE : public ExpiryModuleOS
-{
-public:
-    ExpiryModuleEE()
-    {};
-
-    ~ExpiryModuleEE() {};
-
-    // Print expiry options to LOG file
-    virtual void Dump(Logger * log) const;
-
-protected:
-    // When "creating" write time, chose its source based upon
-    //  open source versus enterprise edition
-    virtual uint64_t GenerateWriteTime(const Slice & Key, const Slice & Value) const;
-
-};  // ExpiryModule
+    bool ValueGetLastModTime(Slice Value, uint64_t & LastModTime);
 
 }  // namespace leveldb
 
