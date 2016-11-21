@@ -168,13 +168,17 @@ KeyGetBucket(
 
 // from riak_kv/src/riak_object.erl
 //
-// header:  <<?MAGIC:8/integer, ?V1_VERS:8/integer, VclockLen:32/integer, VclockBin/binary, SibCount:32/integer, SibsBin/binary>>.
-// sibling:  <<ValLen:32/integer, ValBin:ValLen/binary, MetaLen:32/integer, MetaBin:MetaLen/binary>>.
-// meta:  <<LastModBin/binary, VTagLen:8/integer, VTagBin:VTagLen/binary, Deleted:1/binary-unit:8, RestBin/binary>>.
+// Definition of Riak Object version 1 (in Erlangese)
+//   header:  <<?MAGIC:8/integer, ?V1_VERS:8/integer, VclockLen:32/integer, VclockBin/binary, SibCount:32/integer, SibsBin/binary>>.
+//   sibling:  <<ValLen:32/integer, ValBin:ValLen/binary, MetaLen:32/integer, MetaBin:MetaLen/binary>>.
+//   meta:  <<LastModBin/binary, VTagLen:8/integer, VTagBin:VTagLen/binary, Deleted:1/binary-unit:8, RestBin/binary>>.
 
 
-
-
+/**
+ * The Value is likely a Riak version 0 or version 1 "Riak Object".
+ *  Initial implementation only decodes version 1.  Everything else
+ *  is ignored.
+ */
 bool
 ValueGetLastModTime(
     Slice Value,
@@ -188,13 +192,13 @@ ValueGetLastModTime(
     ret_flag=false;
     LastModTime=0;
     cursor=(const uint8_t *)Value.data();
+    limit=cursor + Value.size();
+
 
     // does this value object start like a Riak v1 object
-    if (cRiakObjV1.m_Uint16==*(uint16_t *)cursor)
+    if (cRiakObjV1.m_Uint16==*(uint16_t *)cursor && (cursor+1)<limit)
     {
-        limit=cursor + Value.size();
-
-        cursor+=2;
+        cursor+=sizeof(cRiakObjV1.m_Uint16);;
 
         // skip over vclock
         vclock_len=ntohl(*(uint32_t *)cursor);
@@ -206,7 +210,7 @@ ValueGetLastModTime(
         cursor+=sizeof(uint32_t);
 
         most_recent=0;
-        for (loop=0, good=true; loop<sib_count && good; ++loop)
+        for (loop=0, good=true; loop<sib_count && good && cursor<limit; ++loop)
         {
             good=SiblingGetLastModTime(cursor, limit, sib_time);
             if (good && most_recent<sib_time)
@@ -260,7 +264,8 @@ SiblingGetLastModTime(
         // set external cursor to next sibling
         Cursor+=(cursor - Cursor) + field_size;
 
-        // read Metadata's LastModTime
+        // read Metadata's LastModTime, an Erlang timestamp
+        //  (three uint32_t integers:  "megaseconds", seconds, microseconds)
         if ((cursor+sizeof(uint32_t)*3)<Limit)
         {
             uint64_t temp;
@@ -355,7 +360,7 @@ bool
 FindDictionaryEntry(
     const char * Key,
     uint32_t KeyLen,
-    const uint8_t * &Cursor, // start of sibling, output set to next sibling
+    const uint8_t * &Cursor, // first dictionary entry, output is matched value
     const uint8_t * Limit)   // overrun test
 {
     bool ret_flag;
@@ -363,7 +368,7 @@ FindDictionaryEntry(
 
     ret_flag=false;
 
-    while((Cursor+4)<Limit && !ret_flag)
+    while((Cursor+sizeof(uint32_t))<Limit && !ret_flag)
     {
         key_len=ntohl(*(uint32_t *)Cursor);
         Cursor+=sizeof(uint32_t);
@@ -389,11 +394,16 @@ FindDictionaryEntry(
 }   // FindDictionaryEntry
 
 
+/**
+ * Currently a handmade decode of expected Erlang Term-To-Binary encoding
+ *  (magic numbers from here:  http://erlang.org/doc/apps/erts/erl_ext_dist.html)
+ *  The encoding is a "list" of "tuple pairs".
+ */
 bool
 FindMetaEntry(
     const char * Key,
     uint32_t KeyLen,
-    const uint8_t * &Cursor, // start of sibling, output set to next sibling
+    const uint8_t * &Cursor, // first pair of Meta K/V items, output is value of matched meta
     const uint8_t * Limit)   // overrun test
 {
     bool ret_flag, good;
@@ -404,7 +414,7 @@ FindMetaEntry(
     meta_limit=Limit;
     ret_flag=false;
     list_len=0;
-    good=((Cursor+4)<Limit);
+    good=((Cursor+sizeof(uint32_t))<Limit);
 
     if (good)
     {
@@ -418,12 +428,14 @@ FindMetaEntry(
     {
         good=(0x00==*Cursor);
         ++Cursor;
+        // look for "new term" tag
         good=(good && Cursor<meta_limit && 0x83==*Cursor);
         ++Cursor;
+        // look for "list term" tag
         good=(good && Cursor<meta_limit && 0x6c==*Cursor);
         ++Cursor;
 
-        good=(good && (Cursor+4)<meta_limit);
+        good=(good && (Cursor+sizeof(uint32_t))<meta_limit);
         if (good)
         {
             list_len=ntohl(*(uint32_t *)Cursor);
@@ -439,14 +451,14 @@ FindMetaEntry(
         //  (element NIL_EXT will be last in list and fail prefix test)
         temp16=*(uint16_t *)Cursor;
         Cursor+=sizeof(uint16_t);
-        good=cTwoTuplePrefix.m_Uint16==temp16 && (Cursor+2)<meta_limit;
+        good=cTwoTuplePrefix.m_Uint16==temp16 && (Cursor+sizeof(uint16_t))<meta_limit;
 
         // decode "key"
         if (good)
         {
             temp16=*(uint16_t *)Cursor;
             Cursor+=sizeof(uint16_t);
-            good=cStringPrefix.m_Uint16==temp16 && (Cursor+2)<meta_limit;
+            good=cStringPrefix.m_Uint16==temp16 && (Cursor+sizeof(uint16_t))<meta_limit;
 
             // get string/key length
             if (good)
@@ -466,7 +478,7 @@ FindMetaEntry(
         {
             temp16=*(uint16_t *)Cursor;
             Cursor+=sizeof(uint16_t);
-            good=cStringPrefix.m_Uint16==temp16 && (Cursor+2)<meta_limit;
+            good=cStringPrefix.m_Uint16==temp16 && (Cursor+sizeof(uint16_t))<meta_limit;
 
             // get string/key length
             if (good)
@@ -480,7 +492,7 @@ FindMetaEntry(
 
     return(ret_flag);
 
-}   // FindDictionaryEntry
+}   // FindMetaEntry
 
 
 
