@@ -143,48 +143,6 @@ KeyGetBucket(
 
 }   // KeyGetBucket (std::string)
 
-#if 0
-                // second tuple is a tuple. its first tuple is binary tag 18: bucket type, bucket
-                if ((cursor+5)<key_end && 16==*cursor && 2==*(cursor+4) && 18==*(cursor+5))
-                {
-                    // shift cursor to first char of binary
-                    cursor+=6;
-                    if (GetBinaryLength(cursor, key_end, length, false))
-                    {
-                        Slice temp((const char *)cursor, length);
-                        BucketType=temp;
-                        cursor+=length;
-
-                        // test for binary (bucket name)
-                        ret_flag=cursor<key_end && 18==*cursor;
-
-                        ++cursor;
-                        if (ret_flag && GetBinaryLength(cursor, key_end, length, false))
-                        {
-                            Slice temp((const char *)cursor, length);
-                            Bucket=temp;
-                            cursor+=length;
-                        }   // if
-                        else
-                        {
-                            ret_flag=false;
-                        }   // else
-                    }   // if
-                }   // if
-
-                // 18 is binary tag:  bucket only
-                else if (18==*cursor)
-                {
-                    ++cursor;
-                    if (GetBinaryLength(cursor, key_end, length, false))
-                    {
-                        Slice temp((const char *)cursor, length);
-                        Bucket=temp;
-                        ret_flag=true;
-                        cursor+=length;
-                    }   // if
-                }   // else if
-#endif
 
 /**
  * Review Key to see if sext encoded Riak key.  If so,
