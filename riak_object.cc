@@ -78,7 +78,8 @@ static bool FindMetaEntry(
 
 static bool GetBinaryLength(const uint8_t * Cursor,
                             const uint8_t * Limit,
-                            int & Length);
+                            int & Length,
+                            bool DecodeLength=true);
 static bool GetBinary(const uint8_t * &Cursor,
                       const uint8_t * Limit,
                       uint8_t * Output);
@@ -95,13 +96,114 @@ KeyGetBucket(
     std::string & BucketType, //< output: bucket type string or clear()
     std::string & Bucket)     //< output: bucket string or clear()
 {
+    Slice composite_slice;
     bool ret_flag;
-    const uint8_t * cursor, * key_end;
+    int length;
+    const uint8_t * key_end, * tmp_ptr, *cursor;
+
+    key_end=(uint8_t *)Key.data() + Key.size();
+    ret_flag=KeyGetBucket(Key, composite_slice);
+
+    BucketType.clear();
+    Bucket.clear();
+
+    if (ret_flag)
+    {
+        // not checking returns other formatting since all checks should
+        //  have occurred within prior KeyGetBucket() call
+        cursor=(uint8_t *)composite_slice.data();
+
+        // tuple means bucket_type and bucket
+        if (16==*cursor)
+        {
+            // shift cursor to first char of binary
+            cursor+=6;
+            GetBinaryLength(cursor, key_end, length);
+            BucketType.resize(length);
+            GetBinary(cursor, key_end, (uint8_t *)BucketType.data());
+
+            ++cursor;
+            GetBinaryLength(cursor, key_end, length);
+            Bucket.resize(length);
+            GetBinary(cursor, key_end, (uint8_t *)Bucket.data());
+
+        }   // if
+
+        // binary name for bucket only
+        else
+        {
+            ++cursor;
+            GetBinaryLength(cursor, key_end, length);
+            Bucket.resize(length);
+            GetBinary(cursor, key_end, (uint8_t *)Bucket.data());
+        }   // else
+    }   // if
+
+    return(ret_flag);
+
+}   // KeyGetBucket (std::string)
+
+#if 0
+                // second tuple is a tuple. its first tuple is binary tag 18: bucket type, bucket
+                if ((cursor+5)<key_end && 16==*cursor && 2==*(cursor+4) && 18==*(cursor+5))
+                {
+                    // shift cursor to first char of binary
+                    cursor+=6;
+                    if (GetBinaryLength(cursor, key_end, length, false))
+                    {
+                        Slice temp((const char *)cursor, length);
+                        BucketType=temp;
+                        cursor+=length;
+
+                        // test for binary (bucket name)
+                        ret_flag=cursor<key_end && 18==*cursor;
+
+                        ++cursor;
+                        if (ret_flag && GetBinaryLength(cursor, key_end, length, false))
+                        {
+                            Slice temp((const char *)cursor, length);
+                            Bucket=temp;
+                            cursor+=length;
+                        }   // if
+                        else
+                        {
+                            ret_flag=false;
+                        }   // else
+                    }   // if
+                }   // if
+
+                // 18 is binary tag:  bucket only
+                else if (18==*cursor)
+                {
+                    ++cursor;
+                    if (GetBinaryLength(cursor, key_end, length, false))
+                    {
+                        Slice temp((const char *)cursor, length);
+                        Bucket=temp;
+                        ret_flag=true;
+                        cursor+=length;
+                    }   // if
+                }   // else if
+#endif
+
+/**
+ * Review Key to see if sext encoded Riak key.  If so,
+ *  parse out Bucket and potentially Bucket Type
+ *  This returns the slice of Bucket Type / Bucket, or just Bucket.
+ *  Intent is that the single slice will be lookup key in cache.
+ */
+bool                          //< true if bucket found, false if not
+KeyGetBucket(
+    Slice & Key,              //< input: key to parse
+    Slice & CompositeBucket)  //< output: entire bucket_type/bucket tuple,
+                              //    or binary bucket name
+{
+    bool ret_flag;
+    const uint8_t * cursor, * key_end, *cursor_temp;
     int length;
 
     ret_flag=false;
-    BucketType.clear();
-    Bucket.clear();
+    CompositeBucket.clear();
 
     // hard coded decode for sext prefix of <<bucket>> or {<<bucket type>>,<<bucket>>}
     /// detect prefix
@@ -125,45 +227,52 @@ KeyGetBucket(
                 // second tuple is a tuple. its first tuple is binary tag 18: bucket type, bucket
                 if ((cursor+5)<key_end && 16==*cursor && 2==*(cursor+4) && 18==*(cursor+5))
                 {
-                    // shift cursor to first char of binary
+                    // return entire {<<bucket type>>, <<bucket>>} slice
+                    cursor_temp=cursor;
+
+                    // shift cursor to first char of bucket type's binary
                     cursor+=6;
-                    if (GetBinaryLength(cursor, key_end, length))
+                    if (GetBinaryLength(cursor, key_end, length, false))
                     {
-                        BucketType.resize(length);
-                        ret_flag=GetBinary(cursor, key_end, (uint8_t *)BucketType.data());
+                        cursor+=length;
 
                         // test for binary (bucket name)
-                        ret_flag=(ret_flag && cursor<key_end && 18==*cursor);
+                        ret_flag=cursor<key_end && 18==*cursor;
 
                         ++cursor;
-                        if (ret_flag && GetBinaryLength(cursor, key_end, length))
+                        if (ret_flag && GetBinaryLength(cursor, key_end, length, false))
                         {
-                            Bucket.resize(length);
-                            ret_flag=GetBinary(cursor, key_end, (uint8_t *)Bucket.data());
+                            cursor+=length;
+                            Slice temp((const char *)cursor_temp, (cursor-cursor_temp));
+                            CompositeBucket=temp;
                         }   // if
+                        else
+                        {
+                            ret_flag=false;
+                        }   // else
                     }   // if
                 }   // if
 
-                // 18 is binary tag:  buckey only
+                // 18 is binary tag:  bucket only
                 else if (18==*cursor)
                 {
+                    cursor_temp=cursor;
                     ++cursor;
-                    if (GetBinaryLength(cursor, key_end, length))
+                    if (GetBinaryLength(cursor, key_end, length, false))
                     {
-                        Bucket.resize(length);
-                        ret_flag=GetBinary(cursor, key_end, (uint8_t *)Bucket.data());
+                        cursor+=length;
+                        Slice temp((const char *)cursor_temp, (cursor-cursor_temp));
+                        CompositeBucket=temp;
+                        ret_flag=true;
                     }   // if
-
                 }   // else if
             }   // if
         }   // if
     }   // if
 
-
-
     return(ret_flag);
 
-}   // KeyGetBucket
+}   // KeyGetBucket (slice)
 
 
 // from riak_kv/src/riak_object.erl
@@ -500,13 +609,16 @@ bool
 GetBinaryLength(
     const uint8_t * Cursor, // first byte of binary (after tag)
     const uint8_t * Limit,  // safety limit / overrun protection
-    int & Length)           // output: count of bytes
+    int & Length,           // output: count of bytes
+    bool DecodedLength)
 {
     bool good, again;
     uint8_t mask;
+    const uint8_t * start;
 
     mask=0x80;
     Length=0;
+    start=Cursor;
 
     do
     {
@@ -529,6 +641,10 @@ GetBinaryLength(
             }   // if
         }   // if
     } while(again && good);
+
+    // +2 -> +1 for Cursor on 0 byte, +1 to next
+    if (!DecodedLength)
+        Length=(Cursor-start) +2;
 
     return(good);
 

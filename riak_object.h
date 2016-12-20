@@ -32,6 +32,7 @@
 namespace leveldb
 {
     bool KeyGetBucket(Slice & Key, std::string & BucketType, std::string & Bucket);
+    bool KeyGetBucket(Slice & Key, Slice & CompositeBucket);
 
     bool ValueGetLastModTime(Slice Value, uint64_t & LastModTime);
 
