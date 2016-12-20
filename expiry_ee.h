@@ -25,6 +25,7 @@
 
 #include <vector>
 
+#include "leveldb/cache.h"
 #include "leveldb/options.h"
 #include "leveldb/expiry.h"
 #include "leveldb/perf_count.h"
@@ -34,6 +35,22 @@
 
 namespace leveldb
 {
+
+struct ExpiryProperties
+{
+    // same options as ExpiryModuleOS (but destined for cache)
+
+    // true: bucket expiry enabled
+    bool m_ExpiryEnabled;
+
+    // number of ttl minutes, zero if disabled
+    uint64_t m_ExpiryMinutes;
+
+    // true: if ok to erase file instead of compaction
+    bool m_WholeFileExpiry;
+
+};  // ExpiryProperties
+
 
 class ExpiryModuleEE : public ExpiryModuleOS
 {
@@ -47,11 +64,94 @@ public:
     virtual void Dump(Logger * log) const;
 
 protected:
+    // utility to CompactionFinalizeCallback to review
+    //  characteristics of one SstFile to see if entirely expired
+    virtual bool IsFileExpired(const FileMetaData & SstFile, ExpiryTime Now, ExpiryTime Aged) const;
+
     // When "creating" write time, chose its source based upon
     //  open source versus enterprise edition
     virtual uint64_t GenerateWriteTime(const Slice & Key, const Slice & Value) const;
 
 };  // ExpiryModule
+
+
+template<typename Object> class CachePtr
+{
+    /****************************************************************
+    *  Member objects
+    ****************************************************************/
+public:
+
+protected:
+    Cache & m_Cache;
+    Object * m_Ptr;            // NULL or object in cache
+private:
+
+    /****************************************************************
+    *  Member functions
+    ****************************************************************/
+public:
+    CachePtr(Cache & CacheObj) : m_Cache(CacheObj), m_Ptr(NULL) {};
+
+    virtual ~CachePtr() {Release();};
+
+    void Release()
+    {
+        if (NULL!=m_Ptr)
+            m_Cache.Release((Cache::Handle*)m_Ptr);
+        m_Ptr=NULL;
+    };
+
+    CachePtr & operator=(Cache::Handle * Hand) {reset(Hand);};
+
+    void assign(Object * Ptr) {reset(Ptr);};
+
+    void reset(Object * ObjectPtr=NULL)
+    {
+        Release();
+        m_Ptr=(Object *)ObjectPtr;
+    }
+
+    Object * get() {return(m_Ptr);};
+
+    const Object * get() const {return(m_Ptr);};
+
+    Object * operator->() {return(m_Ptr);};
+    const Object * operator->() const {return(m_Ptr);};
+
+    Object & operator*() {return(*get());};
+    const Object & operator*() const {return(*get());};
+
+    bool Lookup(const Slice & Key)
+    {
+        Release();
+        m_Ptr=(Object *)m_Cache.Lookup(Key);
+        return(NULL!=m_Ptr);
+    };
+
+    bool Insert(const Slice & Key, Object * Value)
+    {
+        Release();
+        m_Ptr=(Object *)m_Cache.Insert(Key, Value, 1, &Deleter);
+        return(NULL!=m_Ptr);
+    };
+
+    static void Deleter(const Slice& Key, void * Value)
+    {
+        Object * ptr(Value);
+        delete ptr;
+    };
+protected:
+
+private:
+    CachePtr();
+    CachePtr(const CachePtr &);
+    CachePtr & operator=(const CachePtr &);
+
+};  // template CachePtr
+
+
+typedef CachePtr<ExpiryProperties> ExpiryPropPtr_t;
 
 }  // namespace leveldb
 

@@ -30,12 +30,16 @@
 #include "db/db_impl.h"
 #include "db/version_set.h"
 #include "leveldb_ee/expiry_ee.h"
+#include "leveldb_ee/prop_cache.h"
 #include "leveldb_ee/riak_object.h"
 #include "util/logging.h"
 #include "util/throttle.h"
 
 namespace leveldb {
 
+// allow creation of Riak property cache on creation of first
+//  expiry object (only first object)
+static pthread_once_t gExpiryOnce = PTHREAD_ONCE_INIT;
 
 /**
  * This is the factory function to create
@@ -45,9 +49,27 @@ ExpiryModule *
 ExpiryModule::CreateExpiryModule()
 {
 
+    pthread_once(&gExpiryOnce, PropertyCache::InitPropertyCache);
+
     return(new leveldb::ExpiryModuleEE);
 
 }   // ExpiryModule::CreateExpiryModule()
+
+
+/**
+ * static function to clean up expiry related objects
+ *  upon shutdown
+ */
+void
+ExpiryModule::ShutdownExpiryModule()
+{
+
+    // kill off the property cache
+    PropertyCache::ShutdownPropertyCache();
+
+    return;
+
+}   // ExpiryModule::ShutdownExpiryModule
 
 
 /**
@@ -65,6 +87,56 @@ ExpiryModuleEE::Dump(
     return;
 
 }   // ExpiryModuleEE::Dump
+
+
+/**
+ * Review the metadata of one file to see if it is
+ *  eligible for file expiry
+ */
+bool
+ExpiryModuleEE::IsFileExpired(
+    const FileMetaData & SstFile,
+    ExpiryTime Now,
+    ExpiryTime Aged) const
+{
+    bool expired_file(false), good;
+    ExpiryTime aged(Aged);
+    Slice low_composite, high_composite, temp_key;
+    ExpiryPropPtr_t expiry_prop(PropertyCache::GetCache());
+
+    // only delete files with matching buckets for first
+    //  and last key.  Do not process / make any assumptions
+    //  if first and last have different buckets.
+    temp_key=SstFile.smallest.internal_key();
+    good=KeyGetBucket(temp_key, low_composite);
+    temp_key=SstFile.largest.internal_key();
+    good=good && KeyGetBucket(temp_key, high_composite);
+    assert(good);
+
+    // smallest & largest bucket names match, file eligible for whole file expiry
+    expired_file=(good && low_composite==high_composite);
+
+    if (expired_file)
+    {
+        // see if properties found
+        good=PropertyCache::GetExpiryProperties(low_composite, expiry_prop);
+
+        // yes, use bucket level properties
+        if (good)
+        {
+
+        }   // if
+    }   // if
+
+    // test for bucket properties. Set local aged based upon that
+    //  or global aged.
+
+
+
+    expired_file = expired_file && ExpiryModuleOS::IsFileExpired(SstFile, Now, aged);
+    return(expired_file);
+
+}   // ExpiryModuleEE::IsFileExpired
 
 
 /**
