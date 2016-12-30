@@ -98,10 +98,7 @@ KeyGetBucket(
 {
     Slice composite_slice;
     bool ret_flag;
-    int length;
-    const uint8_t * key_end, * tmp_ptr, *cursor;
 
-    key_end=(uint8_t *)Key.data() + Key.size();
     ret_flag=KeyGetBucket(Key, composite_slice);
 
     BucketType.clear();
@@ -109,39 +106,63 @@ KeyGetBucket(
 
     if (ret_flag)
     {
-        // not checking returns other formatting since all checks should
-        //  have occurred within prior KeyGetBucket() call
-        cursor=(uint8_t *)composite_slice.data();
-
-        // tuple means bucket_type and bucket
-        if (16==*cursor)
-        {
-            // shift cursor to first char of binary
-            cursor+=6;
-            GetBinaryLength(cursor, key_end, length);
-            BucketType.resize(length);
-            GetBinary(cursor, key_end, (uint8_t *)BucketType.data());
-
-            ++cursor;
-            GetBinaryLength(cursor, key_end, length);
-            Bucket.resize(length);
-            GetBinary(cursor, key_end, (uint8_t *)Bucket.data());
-
-        }   // if
-
-        // binary name for bucket only
-        else
-        {
-            ++cursor;
-            GetBinaryLength(cursor, key_end, length);
-            Bucket.resize(length);
-            GetBinary(cursor, key_end, (uint8_t *)Bucket.data());
-        }   // else
+        KeyParseBucket(composite_slice, BucketType, Bucket);
     }   // if
 
     return(ret_flag);
 
 }   // KeyGetBucket (std::string)
+
+
+/**
+ * Originally part of KeyGetBucket std::string.  Broken out to
+ *  to allow late parsing of sext CompositeBucket by property cache.
+ *  ASSUMES CompositeBucket's formatting was verified prior to call.
+ */
+void
+KeyParseBucket(
+    const Slice & CompositeBucket,
+    std::string & BucketType,
+    std::string & Bucket)
+{
+    const uint8_t * key_end, *cursor;
+    int length;
+
+    BucketType.clear();
+    Bucket.clear();
+
+    key_end=(uint8_t *)CompositeBucket.data() + CompositeBucket.size();
+
+    // not checking returns about formatting since all checks should
+    //  have occurred within prior KeyGetBucket() call
+    cursor=(uint8_t *)CompositeBucket.data();
+
+    // tuple means bucket_type and bucket
+    if (16==*cursor)
+    {
+        // shift cursor to first char of binary
+        cursor+=6;
+        GetBinaryLength(cursor, key_end, length);
+        BucketType.resize(length);
+        GetBinary(cursor, key_end, (uint8_t *)BucketType.data());
+
+        ++cursor;
+        GetBinaryLength(cursor, key_end, length);
+        Bucket.resize(length);
+        GetBinary(cursor, key_end, (uint8_t *)Bucket.data());
+
+    }   // if
+
+    // binary name for bucket only
+    else
+    {
+        ++cursor;
+        GetBinaryLength(cursor, key_end, length);
+        Bucket.resize(length);
+        GetBinary(cursor, key_end, (uint8_t *)Bucket.data());
+    }   // else
+
+}   // KeyParseBucket
 
 
 /**
@@ -260,7 +281,7 @@ ValueGetLastModTime(
     LastModTime=0;
     cursor=(const uint8_t *)Value.data();
     limit=cursor + Value.size();
-
+    sib_time=0;
 
     // does this value object start like a Riak v1 object
     if (cRiakObjV1.m_Uint16==*(uint16_t *)cursor && (cursor+1)<limit)
@@ -474,7 +495,7 @@ FindMetaEntry(
     const uint8_t * Limit)   // overrun test
 {
     bool ret_flag, good;
-    uint32_t meta_len, key_len, val_len, list_len;
+    uint32_t meta_len, key_len, list_len;
     const uint8_t * meta_limit;
     uint16_t temp16;
 
