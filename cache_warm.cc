@@ -208,7 +208,8 @@ TableCache::PreloadTableCache()
                     handle=NULL;
 
                     // set compaction flag to suggest Linux start pre-reading the files
-                    s2=FindTable(file_no, file_size, level, &handle, (level<config::kNumOverlapLevels));
+                    s2=FindTable(file_no, file_size, level, &handle,
+                                 (level<(uint32_t)config::kNumOverlapLevels));
 
                     if (s2.ok())
                     {
