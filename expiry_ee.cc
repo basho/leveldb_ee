@@ -24,6 +24,7 @@
 #include <inttypes.h>
 #include <limits.h>
 
+#include "port/port_posix.h"
 #include "leveldb/perf_count.h"
 #include "leveldb/env.h"
 #include "db/dbformat.h"
@@ -33,23 +34,33 @@
 #include "leveldb_ee/prop_cache.h"
 #include "leveldb_ee/riak_object.h"
 #include "util/logging.h"
+#include "util/mutexlock.h"
 #include "util/throttle.h"
 
 namespace leveldb {
-
-// allow creation of Riak property cache on creation of first
-//  expiry object (only first object)
-static pthread_once_t gExpiryOnce = PTHREAD_ONCE_INIT;
 
 /**
  * This is the factory function to create
  *  an enterprise edition version of object expiry
  */
 ExpiryModule *
-ExpiryModule::CreateExpiryModule()
+ExpiryModule::CreateExpiryModule(
+    EleveldbRouter_t Router)
 {
+    // creating a manual version of pthread_once because
+    //  the native does not allow parameters to the init function
+    static port::Mutex once_mutex;
+    static volatile bool once_done(false);
 
-    pthread_once(&gExpiryOnce, PropertyCache::InitPropertyCache);
+    {
+        MutexLock lock(&once_mutex);
+
+        if (!once_done)
+        {
+            PropertyCache::InitPropertyCache(Router);
+            once_done=true;
+        }   // if
+    }   // MutexLock
 
     return(new leveldb::ExpiryModuleEE);
 
@@ -80,9 +91,9 @@ void
 ExpiryModuleEE::Dump(
     Logger * log) const
 {
-    Log(log," ExpiryModuleEE.expiry_enabled: %s", expiry_enabled ? "true" : "false");
-    Log(log," ExpiryModuleEE.expiry_minutes: %" PRIu64, expiry_minutes);
-    Log(log,"    ExpiryModuleEE.whole_files: %s", whole_file_expiry ? "true" : "false");
+    Log(log,"  ExpiryModuleEE.expiry_enabled: %s", expiry_enabled ? "true" : "false");
+    Log(log,"  ExpiryModuleEE.expiry_minutes: %" PRIu64, expiry_minutes);
+    Log(log,"     ExpiryModuleEE.whole_files: %s", whole_file_expiry ? "true" : "false");
 
     return;
 
@@ -102,7 +113,7 @@ ExpiryModuleEE::IsFileExpired(
     bool expired_file(false), good;
     ExpiryTime aged(Aged);
     Slice low_composite, high_composite, temp_key;
-    ExpiryPropPtr_t expiry_prop(PropertyCache::GetCache());
+    ExpiryPropPtr_t expiry_prop;
 
     // only delete files with matching buckets for first
     //  and last key.  Do not process / make any assumptions
@@ -119,7 +130,7 @@ ExpiryModuleEE::IsFileExpired(
     if (expired_file)
     {
         // see if properties found
-        good=PropertyCache::GetExpiryProperties(low_composite, expiry_prop);
+        good=expiry_prop.Lookup(low_composite);
 
         // yes, use bucket level properties
         if (good)
