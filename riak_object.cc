@@ -92,7 +92,7 @@ static bool GetBinary(const uint8_t * &Cursor,
  */
 bool                          //< true if bucket found, false if not
 KeyGetBucket(
-    Slice & Key,              //< input: key to parse
+    const Slice & Key,        //< input: key to parse
     std::string & BucketType, //< output: bucket type string or clear()
     std::string & Bucket)     //< output: bucket string or clear()
 {
@@ -173,7 +173,7 @@ KeyParseBucket(
  */
 bool                          //< true if bucket found, false if not
 KeyGetBucket(
-    Slice & Key,              //< input: key to parse
+    const Slice & Key,        //< input: key to parse
     Slice & CompositeBucket)  //< output: entire bucket_type/bucket tuple,
                               //    or binary bucket name
 {

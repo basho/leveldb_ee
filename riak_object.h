@@ -31,8 +31,8 @@
 
 namespace leveldb
 {
-    bool KeyGetBucket(Slice & Key, std::string & BucketType, std::string & Bucket);
-    bool KeyGetBucket(Slice & Key, Slice & CompositeBucket);
+    bool KeyGetBucket(const Slice & Key, std::string & BucketType, std::string & Bucket);
+    bool KeyGetBucket(const Slice & Key, Slice & CompositeBucket);
     void KeyParseBucket(const Slice & CompositeBucket,
                         std::string & BucketType, std::string & Bucket);
 
