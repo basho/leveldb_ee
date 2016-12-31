@@ -101,50 +101,157 @@ ExpiryModuleEE::Dump(
 
 
 /**
+ * Setup expiry environment by bucket, then call
+ *  OS version
+ */
+bool
+ExpiryModuleEE::MemTableInserterCallback(
+    const Slice & Key,   // input: user's key about to be written
+    const Slice & Value, // input: user's value object
+    ValueType & ValType,   // input/output: key type. call might change
+    ExpiryTime & Expiry)   // input/output: 0 or specific expiry. call might change
+    const
+{
+    const ExpiryModuleOS * module_os(this);
+
+    if (expiry_enabled)
+    {
+        bool good(true);
+        ExpiryPropPtr_t expiry_prop;
+        Slice composite_bucket;
+
+        good=KeyGetBucket(Key, composite_bucket);
+
+        // see if properties found
+        good=good && expiry_prop.Lookup(composite_bucket);
+
+        // yes, use bucket level properties
+        if (good)
+            module_os=expiry_prop.get();
+
+    }   // if
+
+    return(module_os->MemTableInserterCallback(Key, Value, ValType, Expiry));
+
+}   // ExpiryModuleEE::MemTableInserterCallback
+
+
+/**
+ * Setup expiry environment by bucket, then call
+ *  OS version
+ *
+ * Note: KeyRetirementCallback could rewrite key to add
+ *  expiry info from Riak object ... but storage backing for new key is questionable.
+ *  Then call ExpiryModuleOS routine to do work.
+ *
+ */
+bool ExpiryModuleEE::KeyRetirementCallback(
+    const ParsedInternalKey & Ikey) const
+{
+    const ExpiryModuleOS * module_os(this);
+
+    if (expiry_enabled)
+    {
+        bool good(true);
+        ExpiryPropPtr_t expiry_prop;
+        Slice composite_bucket;
+
+        good=KeyGetBucket(Ikey.user_key, composite_bucket);
+
+        // see if properties found
+        good=good && expiry_prop.Lookup(composite_bucket);
+
+        // yes, use bucket level properties
+        if (good)
+            module_os=expiry_prop.get();
+
+    }   // if
+
+    return(module_os->KeyRetirementCallback(Ikey));
+
+}   // ExpiryModuleEE::KeyRetirementCallback
+
+
+/**
+ * Setup expiry environment by bucket, then call
+ *  OS version
+ */
+bool ExpiryModuleEE::TableBuilderCallback(
+    const Slice & Key,
+    SstCounters & Counters) const
+{
+    const ExpiryModuleOS * module_os(this);
+
+    if (expiry_enabled)
+    {
+        bool good(true);
+        ExpiryPropPtr_t expiry_prop;
+        Slice composite_bucket;
+
+        good=KeyGetBucket(Key, composite_bucket);
+
+        // see if properties found
+        good=good && expiry_prop.Lookup(composite_bucket);
+
+        // yes, use bucket level properties
+        if (good)
+            module_os=expiry_prop.get();
+
+    }   // if
+
+    return(module_os->TableBuilderCallback(Key, Counters));
+
+}   // ExpiryModuleEE::TableBuilderCallback
+
+/**
+ * MemTableCallback routes through KeyRetirementCallback ... no new code
+ */
+
+
+/**
  * Review the metadata of one file to see if it is
  *  eligible for file expiry
  */
 bool
 ExpiryModuleEE::IsFileExpired(
     const FileMetaData & SstFile,
-    ExpiryTime Now,
-    ExpiryTime Aged) const
+    ExpiryTime Now) const
 {
     bool expired_file(false), good;
-    ExpiryTime aged(Aged);
     Slice low_composite, high_composite, temp_key;
     ExpiryPropPtr_t expiry_prop;
+    const ExpiryModuleOS * module_os(this);
 
-    // only delete files with matching buckets for first
-    //  and last key.  Do not process / make any assumptions
-    //  if first and last have different buckets.
-    temp_key=SstFile.smallest.internal_key();
-    good=KeyGetBucket(temp_key, low_composite);
-    temp_key=SstFile.largest.internal_key();
-    good=good && KeyGetBucket(temp_key, high_composite);
-    assert(good);
-
-    // smallest & largest bucket names match, file eligible for whole file expiry
-    expired_file=(good && low_composite==high_composite);
-
-    if (expired_file)
+    // only endure this overhead if expiry active
+    if (expiry_enabled)
     {
-        // see if properties found
-        good=expiry_prop.Lookup(low_composite);
+        // only delete files with matching buckets for first
+        //  and last key.  Do not process / make any assumptions
+        //  if first and last have different buckets.
+        temp_key=SstFile.smallest.internal_key();
+        good=KeyGetBucket(temp_key, low_composite);
+        temp_key=SstFile.largest.internal_key();
+        good=good && KeyGetBucket(temp_key, high_composite);
+        assert(good);
 
-        // yes, use bucket level properties
-        if (good)
+        // smallest & largest bucket names match, file eligible for whole file expiry
+        expired_file=(good && low_composite==high_composite);
+
+        if (expired_file)
         {
+            // see if properties found
+            good=expiry_prop.Lookup(low_composite);
 
+            // yes, use bucket level properties
+            if (good)
+                module_os=expiry_prop.get();
         }   // if
+
+        // call ExpiryModuleOS function using parameters from
+        //  bucket or default.  smart pointer releases cache handle
+        expired_file = expired_file && module_os->IsFileExpired(SstFile, Now);
     }   // if
 
-    // test for bucket properties. Set local aged based upon that
-    //  or global aged.
-
-
-
-    expired_file = expired_file && ExpiryModuleOS::IsFileExpired(SstFile, Now, aged);
     return(expired_file);
 
 }   // ExpiryModuleEE::IsFileExpired

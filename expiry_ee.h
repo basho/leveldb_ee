@@ -36,22 +36,6 @@
 namespace leveldb
 {
 
-struct ExpiryProperties
-{
-    // same options as ExpiryModuleOS (but destined for cache)
-
-    // true: bucket expiry enabled
-    bool m_ExpiryEnabled;
-
-    // number of ttl minutes, zero if disabled
-    uint64_t m_ExpiryMinutes;
-
-    // true: if ok to erase file instead of compaction
-    bool m_WholeFileExpiry;
-
-};  // ExpiryProperties
-
-
 class ExpiryModuleEE : public ExpiryModuleOS
 {
 public:
@@ -63,10 +47,30 @@ public:
     // Print expiry options to LOG file
     virtual void Dump(Logger * log) const;
 
+    // db/write_batch.cc MemTableInserter::Put() calls this.
+    // returns false on internal error
+    virtual bool MemTableInserterCallback(
+        const Slice & Key,   // input: user's key about to be written
+        const Slice & Value, // input: user's value object
+        ValueType & ValType,   // input/output: key type. call might change
+        ExpiryTime & Expiry) const;  // input/output: 0 or specific expiry. call might change
+
+    // db/dbformat.cc KeyRetirement::operator() calls this.
+    // db/version_set.cc SaveValue() calls this too.
+    // returns true if key is expired, returns false if key not expired
+    virtual bool KeyRetirementCallback(
+        const ParsedInternalKey & Ikey) const;  // input: key to examine for retirement
+
+    // table/table_builder.cc TableBuilder::Add() calls this.
+    // returns false on internal error
+    virtual bool TableBuilderCallback(
+        const Slice & key,       // input: internal key
+        SstCounters & counters) const; // input/output: counters for new sst table
+
 protected:
     // utility to CompactionFinalizeCallback to review
     //  characteristics of one SstFile to see if entirely expired
-    virtual bool IsFileExpired(const FileMetaData & SstFile, ExpiryTime Now, ExpiryTime Aged) const;
+    virtual bool IsFileExpired(const FileMetaData & SstFile, ExpiryTime Now) const;
 
     // When "creating" write time, chose its source based upon
     //  open source versus enterprise edition
