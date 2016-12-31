@@ -31,9 +31,6 @@
 namespace leveldb
 {
 
-// forward declare
-class ExpiryProperties;
-
 class PropertyCache
 {
 public:
@@ -162,7 +159,7 @@ private:
 };  // template CachePtr
 
 
-typedef CachePtr<ExpiryProperties> ExpiryPropPtr_t;
+typedef CachePtr<ExpiryModuleOS> ExpiryPropPtr_t;
 
 
 }  // namespace leveldb
