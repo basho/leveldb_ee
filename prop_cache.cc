@@ -20,6 +20,8 @@
 //
 // -------------------------------------------------------------------
 
+#include <sys/time.h>
+#include <unistd.h>
 
 #include "leveldb_ee/prop_cache.h"
 #include "leveldb_ee/riak_object.h"
@@ -40,6 +42,7 @@ void
 PropertyCache::InitPropertyCache(
     EleveldbRouter_t Router)
 {
+    ShutdownPropertyCache();
     lPropCache = new PropertyCache(Router);
 
     return;
@@ -59,11 +62,17 @@ PropertyCache::ShutdownPropertyCache()
 Cache &
 PropertyCache::GetCache()
 {
-    assert(NULL!=lPropCache);
 
     return(*lPropCache->GetCachePtr());
 
 }   // PropertyCache::GetCache
+
+
+PropertyCache *
+PropertyCache::GetPropertyCachePtr()
+{
+    return(lPropCache);
+}   // PropertyCache::GetPropertyCachePtr
 
 
 /**
@@ -74,9 +83,7 @@ PropertyCache::PropertyCache(
     : m_Cache(NULL), m_Router(Router),
       m_Cond(&m_Mutex)
 {
-    // 1000 is number of cache entries.  Just pulled
-    //  that number out of the air.
-    m_Cache = NewLRUCache2(1000);
+    m_Cache = NewLRUCache2(GetCacheLimit());
 
 }   // PopertyCache::PropertyCache
 
@@ -97,23 +104,27 @@ PropertyCache::Lookup(
     const Slice & CompositeBucket)
 {
     Cache::Handle * ret_handle(NULL);
-    assert(NULL!=lPropCache);
-    assert(NULL!=lPropCache->m_Cache);
 
-    ret_handle=GetCache().Lookup(CompositeBucket);
-
-    // not waiting in the cache already.  Request info
-    if (NULL==ret_handle && NULL!=lPropCache->m_Router)
+    if (NULL!=lPropCache && NULL!=lPropCache->GetCachePtr())
     {
-        ret_handle=lPropCache->LookupWait(CompositeBucket);
-    }   // if
+        ret_handle=GetCache().Lookup(CompositeBucket);
 
+        // not waiting in the cache already.  Request info
+        if (NULL==ret_handle && NULL!=lPropCache->m_Router)
+        {
+            ret_handle=lPropCache->LookupWait(CompositeBucket);
+        }   // if
+    }   // if
+    
     return(ret_handle);
 
 }   // PropertyCache::Lookup
 
 
-
+/**
+ * Callback function used when Cache drops an object
+ *  to make room for another due to cache size being exceeded
+ */
 static void
 DeleteProperty(
     const Slice& key,
@@ -137,19 +148,21 @@ PropertyCache::Insert(
     void * Props,
     Cache::Handle ** OutputPtr)
 {
-    assert(NULL!=lPropCache);
     bool ret_flag(false);
     Cache::Handle * ret_handle(NULL);
 
-    ret_handle=lPropCache->InsertInternal(CompositeBucket, Props);
+    if (NULL!=lPropCache && NULL!=lPropCache->GetCachePtr())
+    {
+        ret_handle=lPropCache->InsertInternal(CompositeBucket, Props);
 
-    if (NULL!=OutputPtr)
-        *OutputPtr=ret_handle;
-    else if (NULL!=ret_handle)
-        GetCache().Release(ret_handle);
+        if (NULL!=OutputPtr)
+            *OutputPtr=ret_handle;
+        else if (NULL!=ret_handle)
+            GetCache().Release(ret_handle);
 
-    ret_flag=(NULL!=ret_handle);
-
+        ret_flag=(NULL!=ret_handle);
+    }   // if
+    
     return(ret_flag);
 
 }   // PropertyCache::Insert
@@ -213,7 +226,16 @@ PropertyCache::LookupWait(
                 timespec ts;
                 MutexLock lock(&m_Mutex);
 
+                // OSX does not do clock_gettime
+#if _POSIX_TIMERS >= 200801L
                 clock_gettime(CLOCK_REALTIME, &ts);
+#else
+                struct timeval tv;
+                gettimeofday(&tv, NULL);
+                ts.tv_sec=tv.tv_sec;
+                ts.tv_nsec=tv.tv_usec*1000;
+#endif
+
                 ts.tv_sec+=1;
                 flag=m_Cond.Wait(&ts);
             }   // if

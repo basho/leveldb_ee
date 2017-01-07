@@ -59,13 +59,20 @@ protected:
     // accessor to m_Cache pointer (really bad if NULL m_Cache)
     Cache * GetCachePtr() {return(m_Cache);};
 
+    // give unit tests access to global property cache object
+    static PropertyCache * GetPropertyCachePtr();
+    
     // internal routine to launch lookup request via eleveldb router, then wait
     Cache::Handle * LookupWait(const Slice & CompositeBucket);
 
     // internal routine to insert object and signal condition variable
     Cache::Handle * InsertInternal(const Slice & CompositeBucket, void * Props);
 
-
+    // 1000 is number of cache entries.  Just pulled
+    //  that number out of the air.
+    // virtual for unit test to override
+    virtual int GetCacheLimit() const {return(1000);}
+    
     Cache * m_Cache;
     EleveldbRouter_t m_Router;
     port::Mutex m_Mutex;
