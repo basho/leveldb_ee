@@ -34,11 +34,18 @@ namespace leveldb
 class PropertyCache
 {
 public:
+    /**
+     * static functions are API for production usage
+     */
+
     // create global cache object
     static void InitPropertyCache(EleveldbRouter_t Router);
 
     // release global cache object
     static void ShutdownPropertyCache();
+
+    // unit test support
+    static void SetGlobalPropertyCache(PropertyCache * NewCache);
 
     // static lookup, usually from CachePtr
     static Cache::Handle * Lookup(const Slice & CompositeBucket);
@@ -53,7 +60,12 @@ public:
     virtual ~PropertyCache();
 
 protected:
-    // only allow creation from InitPropertyCache();
+    /**
+     * protected functions are API for unit tests.  The static functions
+     *  route program flow to these.
+     */
+
+    // only allow creation from InitPropertyCache() or unit tests
     PropertyCache(EleveldbRouter_t);
 
     // accessor to m_Cache pointer (really bad if NULL m_Cache)
@@ -61,7 +73,10 @@ protected:
 
     // give unit tests access to global property cache object
     static PropertyCache * GetPropertyCachePtr();
-    
+
+    // internal equivalent to static Lookup() function
+    Cache::Handle * LookupInternal(const Slice & CompositeBucket);
+
     // internal routine to launch lookup request via eleveldb router, then wait
     Cache::Handle * LookupWait(const Slice & CompositeBucket);
 
@@ -72,7 +87,7 @@ protected:
     //  that number out of the air.
     // virtual for unit test to override
     virtual int GetCacheLimit() const {return(1000);}
-    
+
     Cache * m_Cache;
     EleveldbRouter_t m_Router;
     port::Mutex m_Mutex;
@@ -99,7 +114,7 @@ template<typename Object> class CachePtr
 public:
 
 protected:
-    Object * m_Ptr;            // NULL or object in cache
+    Cache::Handle * m_Ptr;            // NULL or object in cache
 
 private:
 
@@ -114,26 +129,27 @@ public:
     void Release()
     {
         if (NULL!=m_Ptr)
-            PropertyCache::GetCache().Release((Cache::Handle*)m_Ptr);
+            PropertyCache::GetCache().Release(m_Ptr);
         m_Ptr=NULL;
     };
 
     CachePtr & operator=(Cache::Handle * Hand) {reset(Hand);};
 
-    void assign(Object * Ptr) {reset(Ptr);};
-
-    void reset(Object * ObjectPtr=NULL)
+    void reset(Cache::Handle * Hand=NULL)
     {
-        Release();
-        m_Ptr=(Object *)ObjectPtr;
+        if (m_Ptr!=Hand)
+        {
+            Release();
+            m_Ptr=Hand;
+        }   // if
     }
 
-    Object * get() {return(m_Ptr);};
+    Object * get() {return((Object *)PropertyCache::GetCache().Value(m_Ptr));};
 
-    const Object * get() const {return(m_Ptr);};
+    const Object * get() const {return((const Object *)PropertyCache::GetCache().Value(m_Ptr));};
 
-    Object * operator->() {return(m_Ptr);};
-    const Object * operator->() const {return(m_Ptr);};
+    Object * operator->() {return(get());};
+    const Object * operator->() const {return(get());};
 
     Object & operator*() {return(*get());};
     const Object & operator*() const {return(*get());};
@@ -141,20 +157,27 @@ public:
     bool Lookup(const Slice & Key)
     {
         Release();
-        m_Ptr=(Object *)PropertyCache::Lookup(Key);
+        m_Ptr=PropertyCache::Lookup(Key);
         return(NULL!=m_Ptr);
     };
 
     bool Insert(const Slice & Key, Object * Value)
     {
         Release();
-        m_Ptr=(Object *)PropertyCache::GetCache().Insert(Key, Value, 1, &Deleter);
+        m_Ptr=PropertyCache::GetCache().Insert(Key, (void *)Value, 1, &Deleter);
         return(NULL!=m_Ptr);
+    };
+
+    void Erase(const Slice & Key)
+    {
+        Release();
+        PropertyCache::GetCache().Erase(Key);
+        return;
     };
 
     static void Deleter(const Slice& Key, void * Value)
     {
-        Object * ptr(Value);
+        Object * ptr((Object *)Value);
         delete ptr;
     };
 protected:
