@@ -59,6 +59,22 @@ PropertyCache::ShutdownPropertyCache()
 }  // PropertyCache::ShutdownPropertyCache
 
 
+/**
+ * Unit test support.  Allows use of derived versions
+ *  of PropertyCache that easy testing
+ */
+void
+PropertyCache::SetGlobalPropertyCache(
+    PropertyCache * NewGlobal)
+{
+    // (creates infinite loop) ShutdownPropertyCache();
+    lPropCache = NewGlobal;
+
+    return;
+
+}   // PropertyCache::SetGlobalPropertyCache
+
+
 Cache &
 PropertyCache::GetCache()
 {
@@ -105,20 +121,40 @@ PropertyCache::Lookup(
 {
     Cache::Handle * ret_handle(NULL);
 
-    if (NULL!=lPropCache && NULL!=lPropCache->GetCachePtr())
+    if (NULL!=lPropCache)
     {
-        ret_handle=GetCache().Lookup(CompositeBucket);
-
-        // not waiting in the cache already.  Request info
-        if (NULL==ret_handle && NULL!=lPropCache->m_Router)
-        {
-            ret_handle=lPropCache->LookupWait(CompositeBucket);
-        }   // if
+        ret_handle=lPropCache->LookupInternal(CompositeBucket);
     }   // if
-    
+
     return(ret_handle);
 
 }   // PropertyCache::Lookup
+
+
+/**
+ * Retrieve property from cache if available,
+ *  else call out to Riak to get properties
+ */
+Cache::Handle *
+PropertyCache::LookupInternal(
+    const Slice & CompositeBucket)
+{
+    Cache::Handle * ret_handle(NULL);
+
+    if (NULL!=m_Cache)
+    {
+        ret_handle=m_Cache->Lookup(CompositeBucket);
+
+        // not waiting in the cache already.  Request info
+        if (NULL==ret_handle && NULL!=m_Router)
+        {
+            ret_handle=LookupWait(CompositeBucket);
+        }   // if
+    }   // if
+
+    return(ret_handle);
+
+}   // PropertyCache::LookupInternal
 
 
 /**
@@ -162,7 +198,7 @@ PropertyCache::Insert(
 
         ret_flag=(NULL!=ret_handle);
     }   // if
-    
+
     return(ret_flag);
 
 }   // PropertyCache::Insert
@@ -218,13 +254,13 @@ PropertyCache::LookupWait(
         do
         {
             // has value populated since last look?
+            MutexLock lock(&m_Mutex);
             ret_handle=m_Cache->Lookup(CompositeBucket);
 
             // is state appropriate to waiting?
             if (NULL==ret_handle && flag)
             {
                 timespec ts;
-                MutexLock lock(&m_Mutex);
 
                 // OSX does not do clock_gettime
 #if _POSIX_TIMERS >= 200801L
