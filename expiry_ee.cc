@@ -131,7 +131,7 @@ ExpiryModuleEE::MemTableInserterCallback(
 
     }   // if
 
-    return(module_os->MemTableInserterCallback(Key, Value, ValType, Expiry));
+    return(module_os->ExpiryModuleOS::MemTableInserterCallback(Key, Value, ValType, Expiry));
 
 }   // ExpiryModuleEE::MemTableInserterCallback
 
@@ -167,7 +167,7 @@ bool ExpiryModuleEE::KeyRetirementCallback(
 
     }   // if
 
-    return(module_os->KeyRetirementCallback(Ikey));
+    return(module_os->ExpiryModuleOS::KeyRetirementCallback(Ikey));
 
 }   // ExpiryModuleEE::KeyRetirementCallback
 
@@ -199,7 +199,7 @@ bool ExpiryModuleEE::TableBuilderCallback(
 
     }   // if
 
-    return(module_os->TableBuilderCallback(Key, Counters));
+    return(module_os->ExpiryModuleOS::TableBuilderCallback(Key, Counters));
 
 }   // ExpiryModuleEE::TableBuilderCallback
 
@@ -232,7 +232,7 @@ ExpiryModuleEE::IsFileExpired(
         good=KeyGetBucket(temp_key, low_composite);
         temp_key=SstFile.largest.internal_key();
         good=good && KeyGetBucket(temp_key, high_composite);
-        assert(good);
+        //assert(good);
 
         // smallest & largest bucket names match, file eligible for whole file expiry
         expired_file=(good && low_composite==high_composite);
@@ -249,7 +249,7 @@ ExpiryModuleEE::IsFileExpired(
 
         // call ExpiryModuleOS function using parameters from
         //  bucket or default.  smart pointer releases cache handle
-        expired_file = expired_file && module_os->IsFileExpired(SstFile, Now);
+        expired_file = expired_file && module_os->ExpiryModuleOS::IsFileExpired(SstFile, Now);
     }   // if
 
     return(expired_file);
