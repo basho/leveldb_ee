@@ -27,6 +27,7 @@
 #include "leveldb_ee/riak_object.h"
 #include "util/logging.h"
 #include "util/mutexlock.h"
+#include "util/throttle.h"
 
 namespace leveldb {
 
@@ -145,11 +146,37 @@ PropertyCache::LookupInternal(
     {
         ret_handle=m_Cache->Lookup(CompositeBucket);
 
+        // force a reread of properties every 5 minutes
+        if (NULL!=ret_handle)
+        {
+            uint64_t now;
+            ExpiryModule * mod_ptr;
+
+            now=GetTimeMinutes();
+            mod_ptr=(ExpiryModule *)m_Cache->Value(ret_handle);
+
+            // some unit tests of mod_ptr of NULL
+            if (NULL!=mod_ptr && 0!=mod_ptr->ExpiryModuleExpiry()
+                && mod_ptr->ExpiryModuleExpiry()<now)
+            {
+                m_Cache->Release(ret_handle);
+                m_Cache->Erase(CompositeBucket);
+                ret_handle=NULL;
+            }   // if
+        }   // if
+
         // not waiting in the cache already.  Request info
         if (NULL==ret_handle && NULL!=m_Router)
         {
+            // call to Riak required
             ret_handle=LookupWait(CompositeBucket);
+            gPerfCounters->Inc(ePerfPropCacheMiss);
         }   // if
+        else
+        {
+            // cached or no router
+            gPerfCounters->Inc(ePerfPropCacheHit);
+        }   // else
     }   // if
 
     return(ret_handle);
