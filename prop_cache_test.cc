@@ -26,7 +26,7 @@
 #include "util/testutil.h"
 
 #include "leveldb/options.h"
-#include "leveldb_ee/prop_cache.h"
+#include "util/prop_cache.h"
 #include "port/port.h"
 #include "util/mutexlock.h"
 

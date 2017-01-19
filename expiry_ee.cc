@@ -31,7 +31,7 @@
 #include "db/db_impl.h"
 #include "db/version_set.h"
 #include "leveldb_ee/expiry_ee.h"
-#include "leveldb_ee/prop_cache.h"
+#include "util/prop_cache.h"
 #include "leveldb_ee/riak_object.h"
 #include "util/logging.h"
 #include "util/mutexlock.h"
