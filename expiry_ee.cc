@@ -2,7 +2,7 @@
 //
 // expiry_ee.cc
 //
-// Copyright (c) 2016 Basho Technologies, Inc. All Rights Reserved.
+// Copyright (c) 2016-2017 Basho Technologies, Inc. All Rights Reserved.
 //
 // This file is provided to you under the Apache License,
 // Version 2.0 (the "License"); you may not use this file
@@ -39,9 +39,13 @@
 
 namespace leveldb {
 
+static RefPtr<class ExpiryModuleEE> gUserExpirySample;
+
 /**
  * This is the factory function to create
  *  an enterprise edition version of object expiry
+ *  It can be called for BOTH database objects and
+ *  expiry bucket property objects.
  */
 ExpiryModule *
 ExpiryModule::CreateExpiryModule(
@@ -57,12 +61,27 @@ ExpiryModule::CreateExpiryModule(
 
         if (!once_done)
         {
+            gUserExpirySample.reset();
             PropertyCache::InitPropertyCache(Router);
             once_done=true;
         }   // if
     }   // MutexLock
 
-    return(new leveldb::ExpiryModuleEE);
+    ExpiryModuleEE * new_mod;
+
+    new_mod=new leveldb::ExpiryModuleEE;
+
+    // in case new_mod is for bucket cache, seed it
+    //  with resent user defaults
+    if (NULL!=gUserExpirySample.get())
+    {
+        *new_mod=*gUserExpirySample.get();
+    }   // if
+
+    // also in case for bucket cache, 5 minute lifetime
+    new_mod->SetExpiryModuleExpiry(GetTimeMinutes()+5*60*port::UINT64_ONE_SECOND);
+
+    return(new_mod);
 
 }   // ExpiryModule::CreateExpiryModule()
 
@@ -77,10 +96,35 @@ ExpiryModule::ShutdownExpiryModule()
 
     // kill off the property cache
     PropertyCache::ShutdownPropertyCache();
+    gUserExpirySample.reset();
 
     return;
 
 }   // ExpiryModule::ShutdownExpiryModule
+
+
+ExpiryModuleEE &
+ExpiryModuleEE::operator=(
+    const ExpiryModuleEE & rhs)
+{
+    // do not carry forward object expiration (likely none anyway)
+    m_ExpiryModuleExpiry=0;
+
+    // maybe this should call an operator= in ExpiryModuleOS some day?
+    expiry_enabled=rhs.expiry_enabled;
+    expiry_minutes=rhs.expiry_minutes;
+    whole_file_expiry=rhs.whole_file_expiry;
+
+    return(*this);
+
+}   // ExpiryModuleEE::operator=
+
+
+void
+ExpiryModuleEE::NoteUserExpirySettings()
+{
+    gUserExpirySample.assign(this);
+}   // ExpiryModuleEE::NoteUserExpirySettings
 
 
 /**
