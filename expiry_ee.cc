@@ -146,9 +146,12 @@ ExpiryModuleEE::Dump(
 
 /**
  * Setup expiry environment by bucket, then call
- *  OS version
+ *  OS version (callback to db/write_batch.cc MemTableInserter())
+ *
+ * Failed lookup ok to use default since only sets
+ *  write time within key.
  */
-bool
+bool                     // always true, return ignored
 ExpiryModuleEE::MemTableInserterCallback(
     const Slice & Key,   // input: user's key about to be written
     const Slice & Value, // input: user's value object
@@ -181,18 +184,45 @@ ExpiryModuleEE::MemTableInserterCallback(
 
 
 /**
+ * Attempt to retrieve write time from Riak Object
+ */
+uint64_t
+ExpiryModuleEE::GenerateWriteTime(
+    const Slice & Key,
+    const Slice & Value) const
+{
+    uint64_t ret_time;
+
+    // attempt retrieval from Riak Object
+    if (!ValueGetLastModTime(Value, ret_time))
+    {
+        // get from derived class instead
+        ret_time=ExpiryModuleOS::GenerateWriteTime(Key, Value);
+    }   // if
+
+    return(ret_time);
+
+}  // ExpiryModuleEE::GenerateWriteTime()
+
+
+/**
  * Setup expiry environment by bucket, then call
  *  OS version
  *
- * Note: KeyRetirementCallback could rewrite key to add
+ * Note: KeyRetirementCallback could potentially rewrite key to add
  *  expiry info from Riak object ... but storage backing for new key is questionable.
  *  Then call ExpiryModuleOS routine to do work.
+ *
+ * Failure on Lookup could result in expiring something
+ *  that should never expire because bucket says unlimited where
+ *  global says expire now, so expiry skipped when Lookup fails.
  *
  */
 bool ExpiryModuleEE::KeyRetirementCallback(
     const ParsedInternalKey & Ikey) const
 {
     const ExpiryModuleOS * module_os(this);
+    bool is_expired(false);
 
     if (expiry_enabled)
     {
@@ -206,12 +236,15 @@ bool ExpiryModuleEE::KeyRetirementCallback(
         good=good && expiry_prop.Lookup(composite_bucket);
 
         // yes, use bucket level properties
+        //  (no, do nothing because no-bucket is error)
         if (good)
+        {
             module_os=expiry_prop.get();
-
+            is_expired=module_os->ExpiryModuleOS::KeyRetirementCallback(Ikey);
+        }   // if
     }   // if
 
-    return(module_os->ExpiryModuleOS::KeyRetirementCallback(Ikey));
+    return(is_expired);
 
 }   // ExpiryModuleEE::KeyRetirementCallback
 
@@ -219,8 +252,14 @@ bool ExpiryModuleEE::KeyRetirementCallback(
 /**
  * Setup expiry environment by bucket, then call
  *  OS version
+ *
+ * The OS routine is setting date range and delete counts, worst
+ *  if Lookup fails is that delete counts are wrong a leads to
+ *  wasted compactions.  But date range settings are important and
+ *  immune to Lookup failure.  Calling OS via default even on Lookup failure.
  */
-bool ExpiryModuleEE::TableBuilderCallback(
+bool               // return value ignored
+ExpiryModuleEE::TableBuilderCallback(
     const Slice & Key,
     SstCounters & Counters) const
 {
@@ -247,14 +286,22 @@ bool ExpiryModuleEE::TableBuilderCallback(
 
 }   // ExpiryModuleEE::TableBuilderCallback
 
+
 /**
- * MemTableCallback routes through KeyRetirementCallback ... no new code
+ * MemTableCallback routes through KeyRetirementCallback ... no new code for EE required
  */
 
 
 /**
+ * CompactionFinalizeCallback routes through IsFileExpired ... no new code for EE required
+ */
+
+/**
  * Review the metadata of one file to see if it is
  *  eligible for file expiry
+ *
+ * This routine could expiry incorrectly if Lookup fails (returns NULL).  Aborts
+ *  test in such case (returns false).
  */
 bool
 ExpiryModuleEE::IsFileExpired(
@@ -288,38 +335,23 @@ ExpiryModuleEE::IsFileExpired(
 
             // yes, use bucket level properties
             if (good)
+            {
+                // call ExpiryModuleOS function using parameters from bucket
                 module_os=expiry_prop.get();
+                expired_file = module_os->ExpiryModuleOS::IsFileExpired(SstFile, Now);
+            }   // if
+            else
+            {
+                // assume worst case of bad match of default expiry and bucket
+                //  if Lookup fails
+                expired_file=false;
+            }   // else
         }   // if
-
-        // call ExpiryModuleOS function using parameters from
-        //  bucket or default.  smart pointer releases cache handle
-        expired_file = expired_file && module_os->ExpiryModuleOS::IsFileExpired(SstFile, Now);
     }   // if
 
     return(expired_file);
 
 }   // ExpiryModuleEE::IsFileExpired
 
-
-/**
- * Attempt to retrieve write time from Riak Object
- */
-uint64_t
-ExpiryModuleEE::GenerateWriteTime(
-    const Slice & Key,
-    const Slice & Value) const
-{
-    uint64_t ret_time;
-
-    // attempt retrieval from Riak Object
-    if (!ValueGetLastModTime(Value, ret_time))
-    {
-        // get from derived class instead
-        ret_time=ExpiryModuleOS::GenerateWriteTime(Key, Value);
-    }   // if
-
-    return(ret_time);
-
-}  // ExpiryModuleEE::GenerateWriteTime()
 
 }  // namespace leveldb
