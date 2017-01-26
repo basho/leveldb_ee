@@ -72,7 +72,7 @@ ExpiryModule::CreateExpiryModule(
     new_mod=new leveldb::ExpiryModuleEE;
 
     // in case new_mod is for bucket cache, seed it
-    //  with resent user defaults
+    //  with recent user defaults
     if (NULL!=gUserExpirySample.get())
     {
         *new_mod=*gUserExpirySample.get();
