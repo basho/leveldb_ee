@@ -29,6 +29,8 @@
 #include "util/prop_cache.h"
 #include "port/port.h"
 #include "util/mutexlock.h"
+#include "util/throttle.h"
+#include "leveldb/expiry.h"
 
 /**
  * Execution routine
@@ -265,8 +267,22 @@ PropCacheWithRouter::PropTestRouter(
     {
         handle=m_TestObj->InsertInternal(two_slice, NULL);
         m_TestObj->GetCachePtr()->Release(handle);
-        m_TestObj->SetState(4);
     }   // if
+
+    // fourth test ... insert ExpiryModuleEE to test object expire
+    if (*composite==four_slice)
+    {
+        ExpiryModule * ptr;
+
+        ptr=ExpiryModule::CreateExpiryModule(NULL);
+
+        m_TestObj->SetState(m_PropTestRouterState+1);
+        handle=m_TestObj->InsertInternal(four_slice, ptr);
+        m_TestObj->GetCachePtr()->Release(handle);
+
+    }   // if
+
+
 
     return(true);
 
@@ -293,6 +309,17 @@ TEST(PropCacheWithRouter, LookupTest)
     handle=LookupInternal(three_slice);
     ASSERT_TRUE(NULL!=handle);
     GetCachePtr()->Release(handle);
+
+    // verify objects expiry
+    handle=LookupInternal(four_slice);
+    ASSERT_TRUE(NULL!=handle);
+    GetCachePtr()->Release(handle);
+    ASSERT_TRUE(3==m_PropTestRouterState);
+    SetTimeMinutes(GetTimeMinutes()+ 6*60*port::UINT64_ONE_SECOND);
+    handle=LookupInternal(four_slice);
+    ASSERT_TRUE(NULL!=handle);
+    GetCachePtr()->Release(handle);
+    ASSERT_TRUE(4==m_PropTestRouterState);
 
 }   // PropCacheWithRouter::LookupTest
 
