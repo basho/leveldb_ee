@@ -38,6 +38,10 @@ namespace leveldb
 
     bool ValueGetLastModTime(Slice Value, uint64_t & LastModTime);
 
+    // routines for unit test support
+    bool WriteSextString(int Prefix, const char * Text, char * & Cursor);
+    bool BuildRiakKey(const char * BucketType, const char * Bucket, const char * Key, std::string & Output);
+
 }  // namespace leveldb
 
 #endif // ifndef
