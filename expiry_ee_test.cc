@@ -2,7 +2,7 @@
 //
 // expiry_ee_tests.cc
 //
-// Copyright (c) 2016 Basho Technologies, Inc. All Rights Reserved.
+// Copyright (c) 2016-2017 Basho Technologies, Inc. All Rights Reserved.
 //
 // This file is provided to you under the Apache License,
 // Version 2.0 (the "License"); you may not use this file
@@ -34,6 +34,7 @@
 #include "leveldb/slice.h"
 #include "leveldb/write_batch.h"
 #include "leveldb_ee/expiry_ee.h"
+#include "leveldb_ee/riak_object.h"
 
 #include "db/db_impl.h"
 #include "db/dbformat.h"
@@ -42,7 +43,7 @@
 #include "port/port.h"
 #include "util/mutexlock.h"
 #include "util/throttle.h"
-
+#include "util/prop_cache.h"
 /**
  * Execution routine
  */
@@ -54,6 +55,86 @@ int main(int argc, char** argv)
 
 namespace leveldb {
 
+static bool TestRouter(EleveldbRouterActions_t Action, int ParamCount, const void ** Params);
+    static volatile int gRouterCalls(0), gRouterFails(0);
+
+
+/**
+ * This this router contains static replies for select buckets
+ */
+bool
+TestRouter(
+    EleveldbRouterActions_t Action,
+    int ParamCount,
+    const void ** Params)
+{
+    bool ret_flag(false), use_flag(false);
+    const char ** params;
+
+    params=(const char **)Params;
+
+    if (3==ParamCount)
+    {
+        ExpiryPropPtr_t cache;
+        ExpiryModuleEE * ee;
+
+        ee=(leveldb::ExpiryModuleEE *)ExpiryModule::CreateExpiryModule(NULL);
+
+        if ('\0'==*params[0] && 0==strcmp(params[1],"hello"))
+        {
+            ee->expiry_enabled=true;
+            ee->expiry_minutes=ExpiryModule::kExpiryUnlimited;
+            ee->whole_file_expiry=true;
+            use_flag=true;
+        }   // if
+        else if(0==strcmp(params[0],"type_one") && 0==strcmp(params[1],"wild"))
+        {
+            ee->expiry_enabled=false;
+            ee->expiry_minutes=0;
+            ee->whole_file_expiry=false;
+            use_flag=true;
+        }   // else if
+        else if(0==strcmp(params[0],"type_one") && 0==strcmp(params[1],"free"))
+        {
+            ee->expiry_enabled=true;
+            ee->expiry_minutes=5;
+            ee->whole_file_expiry=false;
+            use_flag=true;
+        }   // else if
+        else if ('\0'==*params[0] && 0==strcmp(params[1],"dolly"))
+        {
+            ee->expiry_enabled=true;
+            ee->expiry_minutes=0;
+            ee->whole_file_expiry=false;
+            use_flag=true;
+        }   // else if
+        else if(0==strcmp(params[0],"type_two") && 0==strcmp(params[1],"dos_equis"))
+        {
+            ee->expiry_enabled=true;
+            ee->expiry_minutes=15;
+            ee->whole_file_expiry=true;
+            use_flag=true;
+        }   // else if
+
+        if (use_flag)
+        {
+            ret_flag=cache.Insert(*(Slice *)Params[2], (ExpiryModuleOS*)ee);
+            if (ret_flag)
+                ++gRouterCalls;
+            else
+                ++gRouterFails;
+        }   // if
+        else
+        {
+            delete ee;
+        }   // else
+    }   // if
+
+    return(ret_flag);
+
+}   // TestRouter
+
+
 // helper function to clean up heap objects
 static void ClearMetaArray(Version::FileMetaDataVector_t & ClearMe);
 
@@ -62,126 +143,294 @@ static void ClearMetaArray(Version::FileMetaDataVector_t & ClearMe);
  * Wrapper class for tests.  Holds working variables
  * and helper functions.
  */
-class ExpiryTester
+class ExpiryEETester
 {
 public:
-    ExpiryTester()
+    ExpiryEETester()
     {
+        ExpiryModuleEE * ee;
+
+        // establish default settings
+        //  (its delete managed by smart pointer)
+        ee=(leveldb::ExpiryModuleEE *)ExpiryModule::CreateExpiryModule(&TestRouter);
+        ee->expiry_enabled=false;
+        ee->expiry_minutes=424242;  // just a recognizable number
+        ee->whole_file_expiry=false;
+        ee->NoteUserExpirySettings();
     };
 
-    ~ExpiryTester()
+    ~ExpiryEETester()
     {
     };
-};  // class ExpiryTester
+};  // class ExpiryEETester
 
 
-/**
- * Validate option defaults
- */
-TEST(ExpiryTester, Defaults)
+struct InserterSampleSet
 {
-    ExpiryModuleOS expiry;
-
-    ASSERT_EQ(expiry.expiry_enabled, false);
-    ASSERT_EQ(expiry.expiry_minutes, 0);
-    ASSERT_EQ(expiry.whole_file_expiry, false);
-    ASSERT_EQ(expiry.ExpiryActivated(), false);
-
-}   // test Defaults
+    const char * m_BucketType;
+    const char * m_Bucket;
+    bool m_Test0, m_Test1, m_Test2;
+} Set1[]=
+{
+    {"","hello",            true, true, true},
+    {"","dolly",            true,false,false},
+    {"type_one","wild",     true,false,false},
+    {"type_one","free",     true, true, true},
+    {"type_two","dos_equis",true, true, true},
+    {"type_two","odouls",  false,false, true},
+    {"","default",         false,false, true}
+};
 
 
 /**
  * Validate MemTableInserterCallback
  */
-TEST(ExpiryTester, MemTableInserterCallback)
+TEST(ExpiryEETester, MemTableInserterCallback)
 {
     bool flag;
     uint64_t before, after;
-    ExpiryModuleOS module;
+    ExpiryModuleEE module;
     ValueType type;
     ExpiryTime expiry;
     Slice key, value;
+    int set_size, loop, router_count, router_fail;
+    std::string key_string;
+    ExpiryModuleEE * ee;
 
+    set_size=sizeof(Set1)/sizeof(Set1[0]);
+
+    // this is the "base" module, must be enabled
     module.expiry_enabled=true;
-    module.whole_file_expiry=true;
+    module.expiry_minutes=0;
+    module.whole_file_expiry=false;
     ASSERT_EQ(module.ExpiryActivated(), true);
 
-    // deletion, do nothing
-    type=kTypeDeletion;
-    expiry=0;
-    flag=module.MemTableInserterCallback(key, value, type, expiry);
-    ASSERT_EQ(flag, true);
-    ASSERT_EQ(type, kTypeDeletion);
-    ASSERT_EQ(expiry, 0);
+    // deletion, do nothing (test 0)
+    for (loop=0; loop<set_size; ++loop)
+    {
+        flag=BuildRiakKey(Set1[loop].m_BucketType,Set1[loop].m_Bucket,"Text",key_string);
+        ASSERT_TRUE(flag);
 
-    // plain value, needs expiry
-    type=kTypeValue;
-    expiry=0;
+        Slice loop_slice(key_string);
+        type=kTypeDeletion;
+        expiry=0;
+        router_count=gRouterCalls;
+        router_fail=gRouterFails;
+        flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
+        ASSERT_EQ(flag, true);
+        ASSERT_EQ(type, kTypeDeletion);
+        ASSERT_EQ(expiry, 0);
+        if (Set1[loop].m_Test0)
+            ASSERT_EQ(router_count+1, gRouterCalls);
+        else
+            ASSERT_EQ(router_count, gRouterCalls);
+        ASSERT_EQ(router_fail, gRouterFails);
+    }   // for
+
+
+    // default is expiry_minutes=0 (test 1)
+    module.expiry_minutes=0;
+
+    for (loop=0; loop<set_size; ++loop)
+    {
+        flag=BuildRiakKey(Set1[loop].m_BucketType,Set1[loop].m_Bucket,"Text",key_string);
+        ASSERT_TRUE(flag);
+
+        Slice loop_slice(key_string);
+
+        // plain value, needs expiry
+        type=kTypeValue;
+        expiry=0;
+        router_count=gRouterCalls;
+        router_fail=gRouterFails;
+        before=port::TimeUint64();
+        SetTimeMinutes(before);
+        flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
+        after=port::TimeUint64();
+        ASSERT_EQ(flag, true);
+        if (Set1[loop].m_Test1)
+        {
+            ASSERT_EQ(type, kTypeValueWriteTime);
+            ASSERT_TRUE(before <= expiry && expiry <=after && 0!=expiry);
+        }
+        else
+        {
+            ASSERT_EQ(type, kTypeValue);
+            ASSERT_EQ(expiry, 0);
+        }   // else
+        ASSERT_EQ(router_count, gRouterCalls);
+        ASSERT_EQ(router_fail, gRouterFails);
+    }   // for
+
+    // default is expiry_minutes=30 (test 2)
     module.expiry_minutes=30;
-    before=port::TimeUint64();
-    SetTimeMinutes(before);
-    flag=module.MemTableInserterCallback(key, value, type, expiry);
-    after=port::TimeUint64();
-    ASSERT_EQ(flag, true);
-    ASSERT_EQ(type, kTypeValueWriteTime);
-    ASSERT_TRUE(before <= expiry && expiry <=after && 0!=expiry);
 
-    // plain value, needs expiry
-    type=kTypeValue;
-    expiry=0;
+    for (loop=0; loop<set_size; ++loop)
+    {
+        flag=BuildRiakKey(Set1[loop].m_BucketType,Set1[loop].m_Bucket,"Text",key_string);
+        ASSERT_TRUE(flag);
+
+        Slice loop_slice(key_string);
+
+        // plain value, needs expiry
+        type=kTypeValue;
+        expiry=0;
+        router_count=gRouterCalls;
+        router_fail=gRouterFails;
+        before=port::TimeUint64();
+        SetTimeMinutes(before);
+        module.expiry_minutes=30;
+        flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
+        after=port::TimeUint64();
+        ASSERT_EQ(flag, true);
+        if (Set1[loop].m_Test2)
+        {
+            ASSERT_EQ(type, kTypeValueWriteTime);
+            ASSERT_TRUE(before <= expiry && expiry <=after && 0!=expiry);
+        }
+        else
+        {
+            ASSERT_EQ(type, kTypeValue);
+            ASSERT_EQ(expiry, 0);
+        }   // else
+        ASSERT_EQ(router_count, gRouterCalls);
+        ASSERT_EQ(router_fail, gRouterFails);
+    }   // for
+
+    // default is expiry_minutes=ExpiryModule::kExpiryUnlimited
+    //   (should have same results as test 2)
     module.expiry_minutes=ExpiryModule::kExpiryUnlimited;
-    before=port::TimeUint64();
-    SetTimeMinutes(before);
-    flag=module.MemTableInserterCallback(key, value, type, expiry);
-    after=port::TimeUint64();
-    ASSERT_EQ(flag, true);
-    ASSERT_EQ(type, kTypeValueWriteTime);
-    ASSERT_TRUE(before <= expiry && expiry <=after && 0!=expiry);
+
+    for (loop=0; loop<set_size; ++loop)
+    {
+        flag=BuildRiakKey(Set1[loop].m_BucketType,Set1[loop].m_Bucket,"Text",key_string);
+        ASSERT_TRUE(flag);
+
+        Slice loop_slice(key_string);
+
+        // plain value, needs expiry
+        type=kTypeValue;
+        expiry=0;
+        router_count=gRouterCalls;
+        router_fail=gRouterFails;
+        before=port::TimeUint64();
+        SetTimeMinutes(before);
+        module.expiry_minutes=30;
+        flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
+        after=port::TimeUint64();
+        ASSERT_EQ(flag, true);
+        if (Set1[loop].m_Test2)
+        {
+            ASSERT_EQ(type, kTypeValueWriteTime);
+            ASSERT_TRUE(before <= expiry && expiry <=after && 0!=expiry);
+        }
+        else
+        {
+            ASSERT_EQ(type, kTypeValue);
+            ASSERT_EQ(expiry, 0);
+        }   // else
+        ASSERT_EQ(router_count, gRouterCalls);
+        ASSERT_EQ(router_fail, gRouterFails);
+    }   // for
 
     // plain value, expiry disabled
-    type=kTypeValue;
-    expiry=0;
-    module.expiry_minutes=0;
-    before=port::TimeUint64();
-    SetTimeMinutes(before);
-    flag=module.MemTableInserterCallback(key, value, type, expiry);
-    after=port::TimeUint64();
-    ASSERT_EQ(flag, true);
-    ASSERT_EQ(type, kTypeValue);
-    ASSERT_EQ(expiry, 0);
+    //   (should have same results as test 0)
+    module.expiry_enabled=false;
 
-    // write time value, needs expiry
-    type=kTypeValueWriteTime;
-    expiry=0;
+    for (loop=0; loop<set_size; ++loop)
+    {
+        flag=BuildRiakKey(Set1[loop].m_BucketType,Set1[loop].m_Bucket,"Text",key_string);
+        ASSERT_TRUE(flag);
+
+        Slice loop_slice(key_string);
+
+        // plain value, needs expiry
+        type=kTypeValue;
+        expiry=0;
+        router_count=gRouterCalls;
+        router_fail=gRouterFails;
+        before=port::TimeUint64();
+        SetTimeMinutes(before);
+        module.expiry_minutes=30;
+        flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
+        after=port::TimeUint64();
+        ASSERT_EQ(flag, true);
+        ASSERT_EQ(type, kTypeValue);
+        ASSERT_EQ(expiry, 0);
+        ASSERT_EQ(router_count, gRouterCalls);
+        ASSERT_EQ(router_fail, gRouterFails);
+    }   // for
+
+    // Explicit kTypeValueWriteTime, but no explicit time ()
+    module.expiry_enabled=true;
     module.expiry_minutes=30;
-    before=port::TimeUint64();
-    SetTimeMinutes(before);
-    flag=module.MemTableInserterCallback(key, value, type, expiry);
-    after=port::TimeUint64();
-    ASSERT_EQ(flag, true);
-    ASSERT_EQ(type, kTypeValueWriteTime);
-    ASSERT_TRUE(before <= expiry && expiry <=after && 0!=expiry);
+
+    for (loop=0; loop<set_size; ++loop)
+    {
+        flag=BuildRiakKey(Set1[loop].m_BucketType,Set1[loop].m_Bucket,"Text",key_string);
+        ASSERT_TRUE(flag);
+
+        Slice loop_slice(key_string);
+
+        type=kTypeValueWriteTime;
+        expiry=0;
+        router_count=gRouterCalls;
+        router_fail=gRouterFails;
+        before=port::TimeUint64();
+        SetTimeMinutes(before);
+        module.expiry_minutes=30;
+        flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
+        after=port::TimeUint64();
+        ASSERT_EQ(flag, true);
+        ASSERT_EQ(type, kTypeValueWriteTime);
+        ASSERT_TRUE(before <= expiry && expiry <=after && 0!=expiry);
+        ASSERT_EQ(router_count, gRouterCalls);
+        ASSERT_EQ(router_fail, gRouterFails);
+    }   // for
 
     // write time value, expiry supplied (as if copied from another db)
-    type=kTypeValueWriteTime;
-    module.expiry_minutes=30;
-    before=port::TimeUint64();
-    expiry=before - 1000;
-    SetTimeMinutes(before);
-    flag=module.MemTableInserterCallback(key, value, type, expiry);
-    after=port::TimeUint64();
-    ASSERT_EQ(flag, true);
-    ASSERT_EQ(type, kTypeValueWriteTime);
-    ASSERT_TRUE((before - 1000) == expiry && expiry <=after && 0!=expiry);
+    for (loop=0; loop<set_size; ++loop)
+    {
+        flag=BuildRiakKey(Set1[loop].m_BucketType,Set1[loop].m_Bucket,"Text",key_string);
+        ASSERT_TRUE(flag);
+
+        Slice loop_slice(key_string);
+
+        type=kTypeValueWriteTime;
+        router_count=gRouterCalls;
+        router_fail=gRouterFails;
+        before=port::TimeUint64();
+        expiry=before - 1000;
+        SetTimeMinutes(before);
+        flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
+        after=port::TimeUint64();
+        ASSERT_EQ(flag, true);
+        ASSERT_EQ(type, kTypeValueWriteTime);
+        ASSERT_TRUE((before - 1000) == expiry && expiry <=after && 0!=expiry);
+        ASSERT_EQ(router_count, gRouterCalls);
+        ASSERT_EQ(router_fail, gRouterFails);
+    }   // for
 
     // explicit expiry, not changed
-    type=kTypeValueExplicitExpiry;
-    expiry=97531;
-    module.expiry_minutes=30;
-    flag=module.MemTableInserterCallback(key, value, type, expiry);
-    ASSERT_EQ(flag, true);
-    ASSERT_EQ(type, kTypeValueExplicitExpiry);
-    ASSERT_EQ(expiry, 97531);
+    for (loop=0; loop<set_size; ++loop)
+    {
+        flag=BuildRiakKey(Set1[loop].m_BucketType,Set1[loop].m_Bucket,"Text",key_string);
+        ASSERT_TRUE(flag);
+
+        Slice loop_slice(key_string);
+
+        type=kTypeValueExplicitExpiry;
+        router_count=gRouterCalls;
+        router_fail=gRouterFails;
+        expiry=97531;
+        flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
+        after=port::TimeUint64();
+        ASSERT_EQ(flag, true);
+        ASSERT_EQ(type, kTypeValueExplicitExpiry);
+        ASSERT_EQ(expiry, 97531);
+        ASSERT_EQ(router_count, gRouterCalls);
+        ASSERT_EQ(router_fail, gRouterFails);
+    }   // for
 
 }   // test MemTableInserterCallback
 
@@ -190,7 +439,7 @@ TEST(ExpiryTester, MemTableInserterCallback)
  * Validate MemTableCallback
  *   (supports KeyRetirementCallback in generic case)
  */
-TEST(ExpiryTester, MemTableCallback)
+TEST(ExpiryEETester, MemTableCallback)
 {
     bool flag;
     uint64_t before, after;
@@ -286,7 +535,7 @@ public:
  *  identification of expired files
  */
 
-TEST(ExpiryTester, CompactionFinalizeCallback1)
+TEST(ExpiryEETester, CompactionFinalizeCallback1)
 {
     bool flag;
     uint64_t now, aged, temp_time;
@@ -650,7 +899,7 @@ TestFileMetaData levelD[]=
 };  // levelD
 
 
-TEST(ExpiryTester, OverlapTests)
+TEST(ExpiryEETester, OverlapTests)
 {
     bool flag;
     Version::FileMetaDataVector_t level1, level2, level_clear, expired_files;
@@ -1720,7 +1969,8 @@ TEST(ExpiryDBTester, DefaultOptionsAssignment)
     // clean up (leave exp_ee alone, smart pointer in expiry_ee.cc will delete)
     delete exp2_ee;
 
-}   // ExpiryTester::DefaultOptions
+}   // ExpiryEETester::DefaultOptions
+
 
 }  // namespace leveldb
 
