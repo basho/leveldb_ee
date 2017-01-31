@@ -706,7 +706,7 @@ BuildRiakKey(
         tot_size=5;       // tuple tag & tuple count
         tot_size+=4;      // atom tag & 'o'
 
-        if (NULL!=BucketType)
+        if (NULL!=BucketType && '\0'!=*BucketType)
         {
             tot_size+=5;  // tuple tag & tuple count
             tot_size+= (strlen(BucketType)*8)/7 +3;
@@ -724,7 +724,7 @@ BuildRiakKey(
         *(uint32_t *)cursor=cOKeyPrefix.m_Uint32;
         cursor+=4;
 
-        if (NULL!=BucketType)
+        if (NULL!=BucketType && '\0'!=*BucketType)
         {
             *(uint32_t *)cursor=cSextPrefix.m_Uint32;
             cursor+=4;
