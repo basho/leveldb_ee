@@ -70,6 +70,8 @@ public:
     PropCacheNoRouter()
         : PropertyCache(NULL)
     {
+        // make sure clock is running, depends upon Throttle to initialize
+        SetTimeMinutes(port::TimeUint64());
     };
 
     virtual ~PropCacheNoRouter()
@@ -292,6 +294,7 @@ PropCacheWithRouter::PropTestRouter(
 TEST(PropCacheWithRouter, LookupTest)
 {
     Cache::Handle * handle;
+
 
     // test if an "existing" cache entry found
     AwaitState(1);
