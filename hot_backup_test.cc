@@ -96,6 +96,10 @@ public:
         options.tiered_fast_prefix=m_DBName + "/fast";
         options.tiered_slow_prefix=m_DBName + "/slow";
         DestroyDB("", options);
+
+        // in case not tiered
+        options.tiered_slow_level=0;
+        DestroyDB(m_DBName, options);
     }   // ClearAllBackups
 
 };  // class HotBackupTester
@@ -237,6 +241,69 @@ TEST(HotBackupTester, DirectoryRotationTest)
     //ASSERT_TRUE(0==ret_val);
 
 }   // DirectoryRotationTest
+
+
+/**
+ * Verify that backup directories rotate, but no tiered storage
+ *  (was bug that only appeared in non-tiered configuration)
+ */
+TEST(HotBackupTester, DirectoryRotationTest2)
+{
+    int ret_val, loop, inner_loop, offset, file_num;
+    Options options, backup_options, inner_options;
+    bool ret_flag, should_find, did_find;
+    std::string table_file, backup_name;
+
+    MakeTieredDbname(m_DBName, options);
+    ClearAllBackups(options);
+
+    // manually create database directories
+    ret_val=mkdir(m_DBName.c_str(), 0777);
+    MakeLevelDirectories(Env::Default(), options);
+
+    backup_options=options;
+    SetBackupPaths(backup_options, 0);
+
+    // this loop goes one higher than permitted retention
+    //  to validate deletion of oldest
+    for (loop=0; loop<=config::kNumBackups; ++loop)
+    {
+        // rotate directories
+        ret_flag=PrepareDirectories(options);
+        ASSERT_TRUE(ret_flag);
+
+        // these files are to "mark" the backups, not
+        //  pretending this is a true file link
+        // make a file in fast tier ... 10 + backup iteration
+        table_file=TableFileName(backup_options, 10+loop, 1);
+        ret_val=open(table_file.c_str(), O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
+        ASSERT_TRUE(-1!=ret_val);
+        close(ret_val);
+
+        // test files
+        for (inner_loop=config::kNumBackups+1; 0<=inner_loop; --inner_loop)
+        {
+            offset=(loop<config::kNumBackups) ? 0 : loop-config::kNumBackups +1;
+            should_find=(inner_loop<=loop) && (offset<=inner_loop);
+
+            inner_options=options;
+            SetBackupPaths(inner_options, inner_loop-offset);
+
+            file_num=loop - inner_loop + offset;
+
+            table_file=TableFileName(inner_options, 10+file_num, 1);
+            ret_val=access(table_file.c_str(), F_OK);
+            ASSERT_TRUE( (0==ret_val) == should_find);
+        }   // for
+    }   // for
+
+    ClearAllBackups(options);
+
+    // clean up ... other unit test programs leave stuff, this fails
+    ret_val=rmdir(m_DBName.c_str());
+    //ASSERT_TRUE(0==ret_val);
+
+}   // DirectoryRotationTest2
 
 
 /**
@@ -586,6 +653,7 @@ TEST(HotBackupTester, DoubleDB)
     DestroyDB(db_path, options);
     rmdir(db_path.c_str());
 
+    rmdir(m_DBName.c_str());
 
 }   // DoubleDBTest
 
