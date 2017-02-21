@@ -331,20 +331,20 @@ TEST(PropCacheWithRouter, LookupTest)
  * Wrapper class for tests.  Holds working variables
  * and helper functions.
  */
-class CachePtrTester : public PropertyCache
+class CachePtrTester
 {
 public:
 
     CachePtrTester()
-        : PropertyCache(NULL)
     {
-        ShutdownPropertyCache();
-        SetGlobalPropertyCache(this);
+        // fresh cache
+        PropertyCache::ShutdownPropertyCache();
+        PropertyCache::InitPropertyCache(NULL);
     };
 
     virtual ~CachePtrTester()
     {
-        SetGlobalPropertyCache(NULL);
+        PropertyCache::ShutdownPropertyCache();
     };
 
 };  // class CachePtrTester
