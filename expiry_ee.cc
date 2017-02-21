@@ -136,7 +136,11 @@ ExpiryModuleEE::Dump(
     Logger * log) const
 {
     Log(log,"  ExpiryModuleEE.expiry_enabled: %s", expiry_enabled ? "true" : "false");
-    Log(log,"  ExpiryModuleEE.expiry_minutes: %" PRIu64, expiry_minutes);
+    if (0==expiry_minutes || kExpiryUnlimited==expiry_minutes)
+        Log(log,"  ExpiryModuleEE.expiry_minutes: %s",
+            (0==expiry_minutes ? "off" : "unlimited"));
+    else
+        Log(log,"  ExpiryModuleEE.expiry_minutes: %" PRIu64, expiry_minutes);
     Log(log,"     ExpiryModuleEE.whole_files: %s", whole_file_expiry ? "true" : "false");
 
     return;
