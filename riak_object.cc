@@ -59,10 +59,10 @@ const Binary16_t cStringPrefix={{0x6b, 0x00}};
 
 //struct RiakV1
 
-static bool SiblingGetLastModTime(
+static bool SiblingGetLastModTimeMicros(
     const uint8_t * &Cursor,
     const uint8_t * Limit,
-    uint64_t & ModTime);
+    uint64_t & ModTimeMicros);
 
 static bool FindDictionaryEntry(
     const char * Key,
@@ -268,9 +268,9 @@ KeyGetBucket(
  *  is ignored.
  */
 bool
-ValueGetLastModTime(
+ValueGetLastModTimeMicros(
     Slice Value,
-    uint64_t & LastModTime)
+    uint64_t & LastModTimeMicros)
 {
     bool ret_flag, good;
     const uint8_t * cursor, * limit;
@@ -278,7 +278,7 @@ ValueGetLastModTime(
     uint64_t most_recent, sib_time;
 
     ret_flag=false;
-    LastModTime=0;
+    LastModTimeMicros=0;
     cursor=(const uint8_t *)Value.data();
     limit=cursor + Value.size();
     sib_time=0;
@@ -300,7 +300,7 @@ ValueGetLastModTime(
         most_recent=0;
         for (loop=0, good=true; loop<sib_count && good && cursor<limit; ++loop)
         {
-            good=SiblingGetLastModTime(cursor, limit, sib_time);
+            good=SiblingGetLastModTimeMicros(cursor, limit, sib_time);
             if (good && most_recent<sib_time)
                 most_recent=sib_time;
         }   // for
@@ -308,19 +308,19 @@ ValueGetLastModTime(
         ret_flag=good && 0!=most_recent;
 
         if (ret_flag)
-            LastModTime=most_recent;
+            LastModTimeMicros=most_recent;
     }   // if
 
     return(ret_flag);
 
-}   // ValueGetLastModTime
+}   // ValueGetLastModTimeMicros
 
 
 bool
-SiblingGetLastModTime(
+SiblingGetLastModTimeMicros(
     const uint8_t * &Cursor, // start of sibling, output set to next sibling
     const uint8_t * Limit,   // overrun test
-    uint64_t & ModTime)
+    uint64_t & ModTimeMicros)
 {
     bool ret_flag;
     const uint8_t * cursor;
@@ -369,7 +369,7 @@ SiblingGetLastModTime(
             temp+=ntohl(*(uint32_t *)cursor);
             cursor+=sizeof(uint32_t);
 
-            ModTime=temp;
+            ModTimeMicros=temp;
             ret_flag=true;
         }   // if
 
@@ -428,7 +428,7 @@ SiblingGetLastModTime(
                 if (315550800 < temp && temp < 3471310800 && cursor<Limit)
                 {
                     // ModTime in microseconds
-                    ModTime=temp*1000000;
+                    ModTimeMicros=temp*1000000;
                     ret_flag=true;
                 }   // if
             }   // if
@@ -437,7 +437,7 @@ SiblingGetLastModTime(
 
     return(ret_flag);
 
-}   // SiblingGetLastModTime
+}   // SiblingGetLastModTimeMicros
 
 
 /**

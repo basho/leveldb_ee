@@ -79,7 +79,7 @@ ExpiryModule::CreateExpiryModule(
     }   // if
 
     // also in case for bucket cache, 5 minute lifetime
-    new_mod->SetExpiryModuleExpiry(GetTimeMinutes()+5*60*port::UINT64_ONE_SECOND);
+    new_mod->SetExpiryModuleExpiryMicros(GetTimeMinutes()+5*60*port::UINT64_ONE_SECOND_MICROS);
 
     return(new_mod);
 
@@ -108,7 +108,7 @@ ExpiryModuleEE::operator=(
     const ExpiryModuleEE & rhs)
 {
     // do not carry forward object expiration (likely none anyway)
-    m_ExpiryModuleExpiry=0;
+    m_ExpiryModuleExpiryMicros=0;
 
     // maybe this should call an operator= in ExpiryModuleOS some day?
     expiry_enabled=rhs.expiry_enabled;
@@ -160,7 +160,7 @@ ExpiryModuleEE::MemTableInserterCallback(
     const Slice & Key,   // input: user's key about to be written
     const Slice & Value, // input: user's value object
     ValueType & ValType,   // input/output: key type. call might change
-    ExpiryTime & Expiry)   // input/output: 0 or specific expiry. call might change
+    ExpiryTimeMicros & Expiry)   // input/output: 0 or specific expiry. call might change
     const
 {
     const ExpiryModuleOS * module_os(this);
@@ -191,22 +191,22 @@ ExpiryModuleEE::MemTableInserterCallback(
  * Attempt to retrieve write time from Riak Object
  */
 uint64_t
-ExpiryModuleEE::GenerateWriteTime(
+ExpiryModuleEE::GenerateWriteTimeMicros(
     const Slice & Key,
     const Slice & Value) const
 {
-    uint64_t ret_time;
+    uint64_t ret_micros;
 
     // attempt retrieval from Riak Object
-    if (!ValueGetLastModTime(Value, ret_time))
+    if (!ValueGetLastModTimeMicros(Value, ret_micros))
     {
         // get from derived class instead
-        ret_time=ExpiryModuleOS::GenerateWriteTime(Key, Value);
+        ret_micros=ExpiryModuleOS::GenerateWriteTimeMicros(Key, Value);
     }   // if
 
-    return(ret_time);
+    return(ret_micros);
 
-}  // ExpiryModuleEE::GenerateWriteTime()
+}  // ExpiryModuleEE::GenerateWriteTimeMicros()
 
 
 /**
@@ -222,7 +222,8 @@ ExpiryModuleEE::GenerateWriteTime(
  *  global says expire now, so expiry skipped when Lookup fails.
  *
  */
-bool ExpiryModuleEE::KeyRetirementCallback(
+bool
+ExpiryModuleEE::KeyRetirementCallback(
     const ParsedInternalKey & Ikey) const
 {
     const ExpiryModuleOS * module_os(this);
@@ -300,6 +301,7 @@ ExpiryModuleEE::TableBuilderCallback(
  * CompactionFinalizeCallback routes through IsFileExpired ... no new code for EE required
  */
 
+
 /**
  * Review the metadata of one file to see if it is
  *  eligible for file expiry
@@ -310,7 +312,7 @@ ExpiryModuleEE::TableBuilderCallback(
 bool
 ExpiryModuleEE::IsFileExpired(
     const FileMetaData & SstFile,
-    ExpiryTime Now) const
+    ExpiryTimeMicros Now) const
 {
     bool expired_file(false), good;
     Slice low_composite, high_composite, temp_key;

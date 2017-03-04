@@ -40,7 +40,7 @@ class ExpiryModuleEE : public ExpiryModuleOS
 {
 public:
     ExpiryModuleEE()
-        : m_ExpiryModuleExpiry(0)
+        : m_ExpiryModuleExpiryMicros(0)
     {};
 
     virtual ~ExpiryModuleEE() {};
@@ -57,7 +57,7 @@ public:
         const Slice & Key,   // input: user's key about to be written
         const Slice & Value, // input: user's value object
         ValueType & ValType,   // input/output: key type. call might change
-        ExpiryTime & Expiry) const;  // input/output: 0 or specific expiry. call might change
+        ExpiryTimeMicros & Expiry) const;  // input/output: 0 or specific expiry. call might change
 
     // db/dbformat.cc KeyRetirement::operator() calls this.
     // db/version_set.cc SaveValue() calls this too.
@@ -71,28 +71,28 @@ public:
         const Slice & key,       // input: internal key
         SstCounters & counters) const; // input/output: counters for new sst table
 
-    virtual uint64_t ExpiryModuleExpiry() {return(m_ExpiryModuleExpiry);};
+    virtual uint64_t ExpiryModuleExpiryMicros() {return(m_ExpiryModuleExpiryMicros);};
 
     // Riak EE:  stash a user created module with settings
     virtual void NoteUserExpirySettings();
 
     // Riak EE:  establish timeout for things going to property cache
-    void SetExpiryModuleExpiry(uint64_t Expire) {m_ExpiryModuleExpiry=Expire;};
+    void SetExpiryModuleExpiryMicros(uint64_t Expire) {m_ExpiryModuleExpiryMicros=Expire;};
 
 
 protected:
     // utility to CompactionFinalizeCallback to review
     //  characteristics of one SstFile to see if entirely expired
-    virtual bool IsFileExpired(const FileMetaData & SstFile, ExpiryTime Now) const;
+    virtual bool IsFileExpired(const FileMetaData & SstFile, ExpiryTimeMicros Now) const;
 
     // When "creating" write time, chose its source based upon
     //  open source versus enterprise edition
-    virtual uint64_t GenerateWriteTime(const Slice & Key, const Slice & Value) const;
+    virtual uint64_t GenerateWriteTimeMicros(const Slice & Key, const Slice & Value) const;
 
 
 
-    uint64_t m_ExpiryModuleExpiry;   // for bucket settings, when to flush and reload
-                                     //  (zero for "unused")
+    uint64_t m_ExpiryModuleExpiryMicros; // for bucket settings, when to flush and reload
+                                         //  (zero for "unused")
 private:
     ExpiryModuleEE(const ExpiryModuleEE &);  // copy blocked
 

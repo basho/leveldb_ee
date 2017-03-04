@@ -370,7 +370,7 @@ TEST(RiakObjectTester, LastModTest)
                               0x83, 0x6a};
     Slice patriot_slice(patriot_val, sizeof(patriot_val));
 
-    ret_flag=ValueGetLastModTime(patriot_slice, ret_time);
+    ret_flag=ValueGetLastModTimeMicros(patriot_slice, ret_time);
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(1245495600000000==ret_time);
 
@@ -407,7 +407,7 @@ TEST(RiakObjectTester, LastModTest)
                               0x6a};
     Slice too_old_slice(too_old_val, sizeof(too_old_val));
 
-    ret_flag=ValueGetLastModTime(too_old_slice, ret_time);
+    ret_flag=ValueGetLastModTimeMicros(too_old_slice, ret_time);
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(1479595921568747==ret_time);
 
@@ -444,7 +444,7 @@ TEST(RiakObjectTester, LastModTest)
                                  0x83, 0x6a};
     Slice futuristic_slice(futuristic_val, sizeof(futuristic_val));
 
-    ret_flag=ValueGetLastModTime(futuristic_slice, ret_time);
+    ret_flag=ValueGetLastModTimeMicros(futuristic_slice, ret_time);
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(1479595936409326==ret_time);
 
@@ -482,7 +482,7 @@ TEST(RiakObjectTester, LastModTest)
                               0x6a};
     Slice bad_num_slice(bad_num_val, sizeof(bad_num_val));
 
-    ret_flag=ValueGetLastModTime(bad_num_slice, ret_time);
+    ret_flag=ValueGetLastModTimeMicros(bad_num_slice, ret_time);
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(1479595964994514==ret_time);
 
@@ -520,7 +520,7 @@ TEST(RiakObjectTester, LastModTest)
                                 0x83, 0x6a};
     Slice text_date_slice(text_date_val, sizeof(text_date_val));
 
-    ret_flag=ValueGetLastModTime(text_date_slice, ret_time);
+    ret_flag=ValueGetLastModTimeMicros(text_date_slice, ret_time);
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(1479595955585967==ret_time);
 
@@ -561,7 +561,7 @@ TEST(RiakObjectTester, LastModTest)
                                    0x6e, 0x6b, 0x73, 0x00, 0x00, 0x00, 0x03, 0x00, 0x83, 0x6a};
     Slice before_after_slice(before_after_val, sizeof(before_after_val));
 
-    ret_flag=ValueGetLastModTime(before_after_slice, ret_time);
+    ret_flag=ValueGetLastModTimeMicros(before_after_slice, ret_time);
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(1478342700000000==ret_time);
 

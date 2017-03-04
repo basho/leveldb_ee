@@ -161,7 +161,7 @@ public:
         ee->NoteUserExpirySettings();
 
         // initialize clock that Throttle typically starts
-        SetTimeMinutes(port::TimeUint64());
+        SetTimeMinutes(port::TimeMicros());
 
     };
 
@@ -199,7 +199,7 @@ TEST(ExpiryEETester, MemTableInserterCallback)
     uint64_t before, after;
     ExpiryModuleEE module;
     ValueType type;
-    ExpiryTime expiry;
+    ExpiryTimeMicros expiry;
     Slice key, value;
     int set_size, loop, router_count, router_fail;
     std::string key_string;
@@ -251,10 +251,10 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         expiry=0;
         router_count=gRouterCalls;
         router_fail=gRouterFails;
-        before=port::TimeUint64();
+        before=port::TimeMicros();
         SetTimeMinutes(before);
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
-        after=port::TimeUint64();
+        after=port::TimeMicros();
         ASSERT_EQ(flag, true);
         if (Set1[loop].m_Test1)
         {
@@ -285,11 +285,11 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         expiry=0;
         router_count=gRouterCalls;
         router_fail=gRouterFails;
-        before=port::TimeUint64();
+        before=port::TimeMicros();
         SetTimeMinutes(before);
         module.expiry_minutes=30;
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
-        after=port::TimeUint64();
+        after=port::TimeMicros();
         ASSERT_EQ(flag, true);
         if (Set1[loop].m_Test2)
         {
@@ -321,11 +321,11 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         expiry=0;
         router_count=gRouterCalls;
         router_fail=gRouterFails;
-        before=port::TimeUint64();
+        before=port::TimeMicros();
         SetTimeMinutes(before);
         module.expiry_minutes=30;
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
-        after=port::TimeUint64();
+        after=port::TimeMicros();
         ASSERT_EQ(flag, true);
         if (Set1[loop].m_Test2)
         {
@@ -357,11 +357,11 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         expiry=0;
         router_count=gRouterCalls;
         router_fail=gRouterFails;
-        before=port::TimeUint64();
+        before=port::TimeMicros();
         SetTimeMinutes(before);
         module.expiry_minutes=30;
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
-        after=port::TimeUint64();
+        after=port::TimeMicros();
         ASSERT_EQ(flag, true);
         ASSERT_EQ(type, kTypeValue);
         ASSERT_EQ(expiry, 0);
@@ -384,11 +384,11 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         expiry=0;
         router_count=gRouterCalls;
         router_fail=gRouterFails;
-        before=port::TimeUint64();
+        before=port::TimeMicros();
         SetTimeMinutes(before);
         module.expiry_minutes=30;
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
-        after=port::TimeUint64();
+        after=port::TimeMicros();
         ASSERT_EQ(flag, true);
         ASSERT_EQ(type, kTypeValueWriteTime);
         ASSERT_TRUE(before <= expiry && expiry <=after && 0!=expiry);
@@ -407,11 +407,11 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         type=kTypeValueWriteTime;
         router_count=gRouterCalls;
         router_fail=gRouterFails;
-        before=port::TimeUint64();
+        before=port::TimeMicros();
         expiry=before - 1000;
         SetTimeMinutes(before);
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
-        after=port::TimeUint64();
+        after=port::TimeMicros();
         ASSERT_EQ(flag, true);
         ASSERT_EQ(type, kTypeValueWriteTime);
         ASSERT_TRUE((before - 1000) == expiry && expiry <=after && 0!=expiry);
@@ -432,7 +432,7 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         router_fail=gRouterFails;
         expiry=97531;
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
-        after=port::TimeUint64();
+        after=port::TimeMicros();
         ASSERT_EQ(flag, true);
         ASSERT_EQ(type, kTypeValueExplicitExpiry);
         ASSERT_EQ(expiry, 97531);
@@ -465,7 +465,7 @@ TEST(ExpiryEETester, MemTableCallback)
     module.expiry_minutes=5;
     ASSERT_EQ(module.ExpiryActivated(), true);
 
-    before=port::TimeUint64();
+    before=port::TimeMicros();
     SetTimeMinutes(before);
 
     // deletion, do nothing
@@ -505,7 +505,7 @@ TEST(ExpiryEETester, MemTableCallback)
     //  (key test is that buckets that do not retrieve properties
     //   should return false)
     before=GetTimeMinutes();
-    after=GetTimeMinutes() + 60*port::UINT64_ONE_SECOND;
+    after=GetTimeMinutes() + 60*port::UINT64_ONE_SECOND_MICROS;
     for (loop=0; loop<set_size; ++loop)
     {
         flag=BuildRiakKey(Set1[loop].m_BucketType,Set1[loop].m_Bucket,"ExplicitExpiryKey",key_string);
@@ -518,7 +518,7 @@ TEST(ExpiryEETester, MemTableCallback)
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, false);
         // advance the clock
-        SetTimeMinutes(after + 60*port::UINT64_ONE_SECOND);
+        SetTimeMinutes(after + 60*port::UINT64_ONE_SECOND_MICROS);
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, Set1[loop].m_Test3);
         // disable expiry
@@ -539,7 +539,7 @@ TEST(ExpiryEETester, MemTableCallback)
     //   should return false)
     module.expiry_enabled=true;
     ASSERT_EQ(module.ExpiryActivated(), true);
-    SetTimeMinutes(port::TimeUint64());
+    SetTimeMinutes(port::TimeMicros());
     before=GetTimeMinutes();
     for (loop=0; loop<set_size; ++loop)
     {
@@ -555,19 +555,19 @@ TEST(ExpiryEETester, MemTableCallback)
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, false);
         // advance the clock one minute
-        SetTimeMinutes(after + 60*port::UINT64_ONE_SECOND);
+        SetTimeMinutes(after + 60*port::UINT64_ONE_SECOND_MICROS);
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, false);
         // advance the clock three minute
-        SetTimeMinutes(after + 180*port::UINT64_ONE_SECOND);
+        SetTimeMinutes(after + 180*port::UINT64_ONE_SECOND_MICROS);
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, false);
         // advance the clock 10 minute
-        SetTimeMinutes(after + 600*port::UINT64_ONE_SECOND);
+        SetTimeMinutes(after + 600*port::UINT64_ONE_SECOND_MICROS);
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, Set1[loop].m_Test4);
         // advance the clock twenty minute
-        SetTimeMinutes(after + 1200*port::UINT64_ONE_SECOND);
+        SetTimeMinutes(after + 1200*port::UINT64_ONE_SECOND_MICROS);
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, Set1[loop].m_Test5);
         // disable expiry
@@ -631,7 +631,7 @@ TEST(ExpiryEETester, CompactionFinalizeCallback1)
     module.expiry_minutes=5;
     level=config::kNumOverlapLevels;
 
-    now=port::TimeUint64();
+    now=port::TimeMicros();
     SetTimeMinutes(now);
 
     // put two files into the level, no expiry
@@ -668,7 +668,7 @@ TEST(ExpiryEETester, CompactionFinalizeCallback1)
     module.expiry_enabled=true;
     module.whole_file_expiry=true;
     module.expiry_minutes=5;
-    SetTimeMinutes(now + 360*port::UINT64_ONE_SECOND);
+    SetTimeMinutes(now + 360*port::UINT64_ONE_SECOND_MICROS);
     ver.SetFileList(level, files);
     flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
@@ -685,7 +685,7 @@ TEST(ExpiryEETester, CompactionFinalizeCallback1)
     ASSERT_TRUE(flag);
     file_ptr->largest.SetFrom(ParsedInternalKey(user_key, 0, 6, kTypeValue));
     file_ptr->exp_write_low=ULLONG_MAX;  // sign of no aged expiry, or plain keys
-    file_ptr->exp_explicit_high=now + 60*port::UINT64_ONE_SECOND;
+    file_ptr->exp_explicit_high=now + 60*port::UINT64_ONE_SECOND_MICROS;
     files.push_back(file_ptr);
 
     // disable
@@ -719,7 +719,7 @@ TEST(ExpiryEETester, CompactionFinalizeCallback1)
     ASSERT_TRUE(flag);
     file_ptr->largest.SetFrom(ParsedInternalKey(user_key, 0, 8, kTypeValue));
     file_ptr->exp_write_low=ULLONG_MAX;  // sign of no aged expiry, or plain keys
-    file_ptr->exp_explicit_high=now + 60*port::UINT64_ONE_SECOND;
+    file_ptr->exp_explicit_high=now + 60*port::UINT64_ONE_SECOND_MICROS;
     files.push_back(file_ptr);
     ver.SetFileList(level, files);
 
@@ -758,8 +758,8 @@ TEST(ExpiryEETester, CompactionFinalizeCallback1)
     flag=BuildRiakKey("","hello","NN1",user_key);
     ASSERT_TRUE(flag);
     file_ptr->largest.SetFrom(ParsedInternalKey(user_key, 0, 12, kTypeValue));
-    file_ptr->exp_write_low=now - 60*port::UINT64_ONE_SECOND;
-    file_ptr->exp_write_high=now + 60*port::UINT64_ONE_SECOND;
+    file_ptr->exp_write_low=now - 60*port::UINT64_ONE_SECOND_MICROS;
+    file_ptr->exp_write_high=now + 60*port::UINT64_ONE_SECOND_MICROS;
     files.push_back(file_ptr);
     ver.SetFileList(level, files);
 
@@ -776,8 +776,8 @@ TEST(ExpiryEETester, CompactionFinalizeCallback1)
     flag=BuildRiakKey("type_two","dos_equis","PP1",user_key);
     ASSERT_TRUE(flag);
     file_ptr->largest.SetFrom(ParsedInternalKey(user_key, 0, 12, kTypeValue));
-    file_ptr->exp_write_low=now - 16*60*port::UINT64_ONE_SECOND;
-    file_ptr->exp_write_high=now - 15*60*port::UINT64_ONE_SECOND;
+    file_ptr->exp_write_low=now - 16*60*port::UINT64_ONE_SECOND_MICROS;
+    file_ptr->exp_write_high=now - 15*60*port::UINT64_ONE_SECOND_MICROS;
     files.push_back(file_ptr);
     ver.SetFileList(level, files);
 
@@ -826,7 +826,7 @@ public:
     {
         uint64_t shift;
 
-        shift=Min * 60 * port::UINT64_ONE_SECOND;
+        shift=Min * 60 * port::UINT64_ONE_SECOND_MICROS;
         SetTimeMinutes(GetTimeMinutes() + shift);
     };
 };  // class ExpDB
@@ -837,7 +837,7 @@ class ExpiryDBTester
 public:
     ExpiryDBTester()
         : m_Good(false), m_DB(NULL),
-          m_BaseTime(port::TimeUint64())
+          m_BaseTime(port::TimeMicros())
     {
         m_DBName = test::TmpDir() + "/expiry";
 

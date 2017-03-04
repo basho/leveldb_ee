@@ -71,7 +71,7 @@ public:
         : PropertyCache(NULL)
     {
         // make sure clock is running, depends upon Throttle to initialize
-        SetTimeMinutes(port::TimeUint64());
+        SetTimeMinutes(port::TimeMicros());
     };
 
     virtual ~PropCacheNoRouter()
@@ -318,7 +318,7 @@ TEST(PropCacheWithRouter, LookupTest)
     ASSERT_TRUE(NULL!=handle);
     GetCachePtr()->Release(handle);
     ASSERT_TRUE(3==m_PropTestRouterState);
-    SetTimeMinutes(GetTimeMinutes()+ 6*60*port::UINT64_ONE_SECOND);
+    SetTimeMinutes(GetTimeMinutes()+ 6*60*port::UINT64_ONE_SECOND_MICROS);
     handle=LookupInternal(four_slice);
     ASSERT_TRUE(NULL!=handle);
     GetCachePtr()->Release(handle);

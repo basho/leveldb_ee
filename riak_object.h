@@ -36,7 +36,7 @@ namespace leveldb
     void KeyParseBucket(const Slice & CompositeBucket,
                         std::string & BucketType, std::string & Bucket);
 
-    bool ValueGetLastModTime(Slice Value, uint64_t & LastModTime);
+    bool ValueGetLastModTimeMicros(Slice Value, uint64_t & LastModTimeMicros);
 
     // routines for unit test support
     bool WriteSextString(int Prefix, const char * Text, char * & Cursor);
