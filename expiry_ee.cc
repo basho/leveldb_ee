@@ -111,9 +111,10 @@ ExpiryModuleEE::operator=(
     m_ExpiryModuleExpiryMicros=0;
 
     // maybe this should call an operator= in ExpiryModuleOS some day?
-    expiry_enabled=rhs.expiry_enabled;
-    expiry_minutes=rhs.expiry_minutes;
-    whole_file_expiry=rhs.whole_file_expiry;
+    SetExpiryEnabled(rhs.IsExpiryEnabled());
+    SetExpiryMinutes(rhs.GetExpiryMinutes());
+    SetExpiryUnlimited(rhs.IsExpiryUnlimited());
+    SetWholeFileExpiryEnabled(rhs.IsWholeFileExpiryEnabled());
 
     return(*this);
 
@@ -135,13 +136,10 @@ void
 ExpiryModuleEE::Dump(
     Logger * log) const
 {
-    Log(log,"  ExpiryModuleEE.expiry_enabled: %s", expiry_enabled ? "true" : "false");
-    if (0==expiry_minutes || kExpiryUnlimited==expiry_minutes)
-        Log(log,"  ExpiryModuleEE.expiry_minutes: %s",
-            (0==expiry_minutes ? "off" : "unlimited"));
-    else
-        Log(log,"  ExpiryModuleEE.expiry_minutes: %" PRIu64, expiry_minutes);
-    Log(log,"     ExpiryModuleEE.whole_files: %s", whole_file_expiry ? "true" : "false");
+    Log(log,"  ExpiryModuleEE.expiry_enabled: %s", IsExpiryEnabled() ? "true" : "false");
+    Log(log,"  ExpiryModuleEE.expiry_minutes: %" PRIu64, GetExpiryMinutes());
+    Log(log,"ExpiryModuleEE.expiry_unlimited: %s", IsExpiryUnlimited() ? "true" : "false");
+    Log(log,"     ExpiryModuleEE.whole_files: %s", IsWholeFileExpiryEnabled() ? "true" : "false");
 
     return;
 
@@ -165,7 +163,7 @@ ExpiryModuleEE::MemTableInserterCallback(
 {
     const ExpiryModuleOS * module_os(this);
 
-    if (expiry_enabled)
+    if (IsExpiryEnabled())
     {
         bool good(true);
         ExpiryPropPtr_t expiry_prop;
@@ -229,7 +227,7 @@ ExpiryModuleEE::KeyRetirementCallback(
     const ExpiryModuleOS * module_os(this);
     bool is_expired(false);
 
-    if (expiry_enabled)
+    if (IsExpiryEnabled())
     {
         bool good(true);
         ExpiryPropPtr_t expiry_prop;
@@ -270,7 +268,7 @@ ExpiryModuleEE::TableBuilderCallback(
 {
     const ExpiryModuleOS * module_os(this);
 
-    if (expiry_enabled)
+    if (IsExpiryEnabled())
     {
         bool good(true);
         ExpiryPropPtr_t expiry_prop;
@@ -320,7 +318,7 @@ ExpiryModuleEE::IsFileExpired(
     const ExpiryModuleOS * module_os(this);
 
     // only endure this overhead if expiry active
-    if (expiry_enabled)
+    if (IsExpiryEnabled())
     {
         // only delete files with matching buckets for first
         //  and last key.  Do not process / make any assumptions

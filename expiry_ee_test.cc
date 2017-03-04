@@ -84,37 +84,37 @@ TestRouter(
 
         if ('\0'==*params[0] && 0==strcmp(params[1],"hello"))
         {
-            ee->expiry_enabled=true;
-            ee->expiry_minutes=ExpiryModule::kExpiryUnlimited;
-            ee->whole_file_expiry=true;
+            ee->SetExpiryEnabled(true);
+            ee->SetExpiryUnlimited(true);
+            ee->SetWholeFileExpiryEnabled(true);
             use_flag=true;
         }   // if
         else if(0==strcmp(params[0],"type_one") && 0==strcmp(params[1],"wild"))
         {
-            ee->expiry_enabled=false;
-            ee->expiry_minutes=0;
-            ee->whole_file_expiry=false;
+            ee->SetExpiryEnabled(false);
+            ee->SetExpiryMinutes(0);
+            ee->SetWholeFileExpiryEnabled(false);
             use_flag=true;
         }   // else if
         else if(0==strcmp(params[0],"type_one") && 0==strcmp(params[1],"free"))
         {
-            ee->expiry_enabled=true;
-            ee->expiry_minutes=5;
-            ee->whole_file_expiry=false;
+            ee->SetExpiryEnabled(true);
+            ee->SetExpiryMinutes(5);
+            ee->SetWholeFileExpiryEnabled(false);
             use_flag=true;
         }   // else if
         else if ('\0'==*params[0] && 0==strcmp(params[1],"dolly"))
         {
-            ee->expiry_enabled=true;
-            ee->expiry_minutes=0;
-            ee->whole_file_expiry=false;
+            ee->SetExpiryEnabled(true);
+            ee->SetExpiryMinutes(0);
+            ee->SetWholeFileExpiryEnabled(false);
             use_flag=true;
         }   // else if
         else if(0==strcmp(params[0],"type_two") && 0==strcmp(params[1],"dos_equis"))
         {
-            ee->expiry_enabled=true;
-            ee->expiry_minutes=15;
-            ee->whole_file_expiry=true;
+            ee->SetExpiryEnabled(true);
+            ee->SetExpiryMinutes(15);
+            ee->SetWholeFileExpiryEnabled(true);
             use_flag=true;
         }   // else if
 
@@ -155,9 +155,9 @@ public:
         // establish default settings
         //  (its delete managed by smart pointer)
         ee=(leveldb::ExpiryModuleEE *)ExpiryModule::CreateExpiryModule(&TestRouter);
-        ee->expiry_enabled=false;
-        ee->expiry_minutes=424242;  // just a recognizable number
-        ee->whole_file_expiry=false;
+        ee->SetExpiryEnabled(false);
+        ee->SetExpiryMinutes(424242);  // just a recognizable number
+        ee->SetWholeFileExpiryEnabled(false);
         ee->NoteUserExpirySettings();
 
         // initialize clock that Throttle typically starts
@@ -208,9 +208,9 @@ TEST(ExpiryEETester, MemTableInserterCallback)
     set_size=sizeof(Set1)/sizeof(Set1[0]);
 
     // this is the "base" module, must be enabled
-    module.expiry_enabled=true;
-    module.expiry_minutes=0;
-    module.whole_file_expiry=false;
+    module.SetExpiryEnabled(true);
+    module.SetExpiryMinutes(0);
+    module.SetWholeFileExpiryEnabled(false);
     ASSERT_EQ(module.ExpiryActivated(), true);
 
     // deletion, do nothing (test 0)
@@ -237,7 +237,7 @@ TEST(ExpiryEETester, MemTableInserterCallback)
 
 
     // default is expiry_minutes=0 (test 1)
-    module.expiry_minutes=0;
+    module.SetExpiryMinutes(0);
 
     for (loop=0; loop<set_size; ++loop)
     {
@@ -271,7 +271,7 @@ TEST(ExpiryEETester, MemTableInserterCallback)
     }   // for
 
     // default is expiry_minutes=30 (test 2)
-    module.expiry_minutes=30;
+    module.SetExpiryMinutes(30);
 
     for (loop=0; loop<set_size; ++loop)
     {
@@ -287,7 +287,7 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         router_fail=gRouterFails;
         before=port::TimeMicros();
         SetTimeMinutes(before);
-        module.expiry_minutes=30;
+        module.SetExpiryMinutes(30);
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
         after=port::TimeMicros();
         ASSERT_EQ(flag, true);
@@ -307,7 +307,7 @@ TEST(ExpiryEETester, MemTableInserterCallback)
 
     // default is expiry_minutes=ExpiryModule::kExpiryUnlimited
     //   (should have same results as test 2)
-    module.expiry_minutes=ExpiryModule::kExpiryUnlimited;
+    module.SetExpiryUnlimited(true);
 
     for (loop=0; loop<set_size; ++loop)
     {
@@ -323,7 +323,7 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         router_fail=gRouterFails;
         before=port::TimeMicros();
         SetTimeMinutes(before);
-        module.expiry_minutes=30;
+        module.SetExpiryMinutes(30);
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
         after=port::TimeMicros();
         ASSERT_EQ(flag, true);
@@ -343,7 +343,7 @@ TEST(ExpiryEETester, MemTableInserterCallback)
 
     // plain value, expiry disabled
     //   (should have same results as test 0)
-    module.expiry_enabled=false;
+    module.SetExpiryEnabled(false);
 
     for (loop=0; loop<set_size; ++loop)
     {
@@ -359,7 +359,7 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         router_fail=gRouterFails;
         before=port::TimeMicros();
         SetTimeMinutes(before);
-        module.expiry_minutes=30;
+        module.SetExpiryMinutes(30);
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
         after=port::TimeMicros();
         ASSERT_EQ(flag, true);
@@ -370,8 +370,8 @@ TEST(ExpiryEETester, MemTableInserterCallback)
     }   // for
 
     // Explicit kTypeValueWriteTime, but no explicit time ()
-    module.expiry_enabled=true;
-    module.expiry_minutes=30;
+    module.SetExpiryEnabled(true);
+    module.SetExpiryMinutes(30);
 
     for (loop=0; loop<set_size; ++loop)
     {
@@ -386,7 +386,7 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         router_fail=gRouterFails;
         before=port::TimeMicros();
         SetTimeMinutes(before);
-        module.expiry_minutes=30;
+        module.SetExpiryMinutes(30);
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
         after=port::TimeMicros();
         ASSERT_EQ(flag, true);
@@ -460,9 +460,9 @@ TEST(ExpiryEETester, MemTableCallback)
 
     // this is the "base" module, must be enabled
     ASSERT_EQ(module.ExpiryActivated(), false);
-    module.expiry_enabled=true;
-    module.whole_file_expiry=true;
-    module.expiry_minutes=5;
+    module.SetExpiryEnabled(true);
+    module.SetWholeFileExpiryEnabled(true);
+    module.SetExpiryMinutes(5);
     ASSERT_EQ(module.ExpiryActivated(), true);
 
     before=port::TimeMicros();
@@ -522,7 +522,7 @@ TEST(ExpiryEETester, MemTableCallback)
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, Set1[loop].m_Test3);
         // disable expiry
-        module.expiry_enabled=false;
+        module.SetExpiryEnabled(false);
         ASSERT_EQ(module.ExpiryActivated(), false);
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, false);
@@ -531,19 +531,19 @@ TEST(ExpiryEETester, MemTableCallback)
 
         // reset expiry state each loop
         SetTimeMinutes(before);
-        module.expiry_enabled=true;
+        module.SetExpiryEnabled(true);
     }   // for
 
     // age expiry
     //  (key test is that buckets that do not retrieve properties
     //   should return false)
-    module.expiry_enabled=true;
+    module.SetExpiryEnabled(true);
     ASSERT_EQ(module.ExpiryActivated(), true);
     SetTimeMinutes(port::TimeMicros());
     before=GetTimeMinutes();
     for (loop=0; loop<set_size; ++loop)
     {
-        module.expiry_minutes=2;
+        module.SetExpiryMinutes(2);
         after=GetTimeMinutes();
         flag=BuildRiakKey(Set1[loop].m_BucketType,Set1[loop].m_Bucket,"AgeKey",key_string);
         ASSERT_TRUE(flag);
@@ -571,7 +571,7 @@ TEST(ExpiryEETester, MemTableCallback)
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, Set1[loop].m_Test5);
         // disable expiry
-        module.expiry_enabled=false;
+        module.SetExpiryEnabled(false);
         ASSERT_EQ(module.ExpiryActivated(), false);
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, false);
@@ -583,7 +583,7 @@ TEST(ExpiryEETester, MemTableCallback)
 
         // reset expiry state each loop
         SetTimeMinutes(before);
-        module.expiry_enabled=true;
+        module.SetExpiryEnabled(true);
     }   // for
 
 }   // test MemTableCallback
@@ -626,9 +626,9 @@ TEST(ExpiryEETester, CompactionFinalizeCallback1)
 
     ASSERT_EQ(ver.m_Options.ExpiryActivated(), false);
 
-    module.expiry_enabled=true;
-    module.whole_file_expiry=true;
-    module.expiry_minutes=5;
+    module.SetExpiryEnabled(true);
+    module.SetWholeFileExpiryEnabled(true);
+    module.SetExpiryMinutes(5);
     level=config::kNumOverlapLevels;
 
     now=port::TimeMicros();
@@ -654,9 +654,9 @@ TEST(ExpiryEETester, CompactionFinalizeCallback1)
     files.push_back(file_ptr);
 
     // disable
-    module.expiry_enabled=false;
-    module.whole_file_expiry=false;
-    module.expiry_minutes=0;
+    module.SetExpiryEnabled(false);
+    module.SetWholeFileExpiryEnabled(false);
+    module.SetExpiryMinutes(0);
     ver.SetFileList(level, files);
     flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
@@ -665,9 +665,9 @@ TEST(ExpiryEETester, CompactionFinalizeCallback1)
 
     // enable and move clock
     //  (bucket type_one/free has 5 minute expiry)
-    module.expiry_enabled=true;
-    module.whole_file_expiry=true;
-    module.expiry_minutes=5;
+    module.SetExpiryEnabled(true);
+    module.SetWholeFileExpiryEnabled(true);
+    module.SetExpiryMinutes(5);
     SetTimeMinutes(now + 360*port::UINT64_ONE_SECOND_MICROS);
     ver.SetFileList(level, files);
     flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
@@ -689,9 +689,9 @@ TEST(ExpiryEETester, CompactionFinalizeCallback1)
     files.push_back(file_ptr);
 
     // disable
-    module.expiry_enabled=false;
-    module.whole_file_expiry=false;
-    module.expiry_minutes=0;
+    module.SetExpiryEnabled(false);
+    module.SetWholeFileExpiryEnabled(false);
+    module.SetExpiryMinutes(0);
     ver.SetFileList(level, files);
     flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
@@ -699,9 +699,9 @@ TEST(ExpiryEETester, CompactionFinalizeCallback1)
     ASSERT_EQ(flag, false);
 
     // enable compaction expiry only
-    module.expiry_enabled=true;
-    module.whole_file_expiry=false;
-    module.expiry_minutes=5;
+    module.SetExpiryEnabled(true);
+    module.SetWholeFileExpiryEnabled(false);
+    module.SetExpiryMinutes(5);
     ver.SetFileList(level, files);
     flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
@@ -897,15 +897,15 @@ TEST(ExpiryDBTester, DefaultOptionsAssignment)
     exp_ee=(ExpiryModuleEE *)ExpiryModule::CreateExpiryModule(NULL);
 
     // verify default state
-    ASSERT_EQ(exp_ee->expiry_enabled, false);
-    ASSERT_EQ(exp_ee->expiry_minutes, 424242);
-    ASSERT_EQ(exp_ee->whole_file_expiry, false);
+    ASSERT_EQ(exp_ee->IsExpiryEnabled(), false);
+    ASSERT_EQ(exp_ee->GetExpiryMinutes(), 424242);
+    ASSERT_EQ(exp_ee->IsWholeFileExpiryEnabled(), false);
     ASSERT_EQ(exp_ee->ExpiryActivated(), false);
 
     // manually change
-    exp_ee->expiry_enabled = true;
-    exp_ee->expiry_minutes=4242;
-    exp_ee->whole_file_expiry=true;
+    exp_ee->SetExpiryEnabled(true);
+    exp_ee->SetExpiryMinutes(4242);
+    exp_ee->SetWholeFileExpiryEnabled(true);
 
     exp_ee->NoteUserExpirySettings();
 
@@ -913,31 +913,31 @@ TEST(ExpiryDBTester, DefaultOptionsAssignment)
     exp2_ee=(ExpiryModuleEE *)ExpiryModule::CreateExpiryModule(NULL);
 
     // verify default state
-    ASSERT_EQ(exp2_ee->expiry_enabled, true);
-    ASSERT_EQ(exp2_ee->expiry_minutes, 4242);
-    ASSERT_EQ(exp2_ee->whole_file_expiry, true);
+    ASSERT_EQ(exp2_ee->IsExpiryEnabled(), true);
+    ASSERT_EQ(exp2_ee->GetExpiryMinutes(), 4242);
+    ASSERT_EQ(exp2_ee->IsWholeFileExpiryEnabled(), true);
     ASSERT_EQ(exp2_ee->ExpiryActivated(), true);
 
     // now verify assignment, field by field
-    exp_ee->expiry_enabled=false;
+    exp_ee->SetExpiryEnabled(false);
     *exp2_ee=*exp_ee;
-    ASSERT_EQ(exp2_ee->expiry_enabled, false);
-    ASSERT_EQ(exp2_ee->expiry_minutes, 4242);
-    ASSERT_EQ(exp2_ee->whole_file_expiry, true);
+    ASSERT_EQ(exp2_ee->IsExpiryEnabled(), false);
+    ASSERT_EQ(exp2_ee->GetExpiryMinutes(), 4242);
+    ASSERT_EQ(exp2_ee->IsWholeFileExpiryEnabled(), true);
     ASSERT_EQ(exp2_ee->ExpiryActivated(), false);
 
-    exp_ee->expiry_minutes=110516;
+    exp_ee->SetExpiryMinutes(110516);
     *exp2_ee=*exp_ee;
-    ASSERT_EQ(exp2_ee->expiry_enabled, false);
-    ASSERT_EQ(exp2_ee->expiry_minutes, 110516);
-    ASSERT_EQ(exp2_ee->whole_file_expiry, true);
+    ASSERT_EQ(exp2_ee->IsExpiryEnabled(), false);
+    ASSERT_EQ(exp2_ee->GetExpiryMinutes(), 110516);
+    ASSERT_EQ(exp2_ee->IsWholeFileExpiryEnabled(), true);
     ASSERT_EQ(exp2_ee->ExpiryActivated(), false);
 
-    exp_ee->whole_file_expiry=false;
+    exp_ee->SetWholeFileExpiryEnabled(false);
     *exp2_ee=*exp_ee;
-    ASSERT_EQ(exp2_ee->expiry_enabled, false);
-    ASSERT_EQ(exp2_ee->expiry_minutes, 110516);
-    ASSERT_EQ(exp2_ee->whole_file_expiry, false);
+    ASSERT_EQ(exp2_ee->IsExpiryEnabled(), false);
+    ASSERT_EQ(exp2_ee->GetExpiryMinutes(), 110516);
+    ASSERT_EQ(exp2_ee->IsWholeFileExpiryEnabled(), false);
     ASSERT_EQ(exp2_ee->ExpiryActivated(), false);
 
     // update default state
@@ -945,9 +945,9 @@ TEST(ExpiryDBTester, DefaultOptionsAssignment)
     delete exp2_ee;
     exp2_ee=(ExpiryModuleEE *)ExpiryModule::CreateExpiryModule(NULL);
 
-    ASSERT_EQ(exp2_ee->expiry_enabled, false);
-    ASSERT_EQ(exp2_ee->expiry_minutes, 110516);
-    ASSERT_EQ(exp2_ee->whole_file_expiry, false);
+    ASSERT_EQ(exp2_ee->IsExpiryEnabled(), false);
+    ASSERT_EQ(exp2_ee->GetExpiryMinutes(), 110516);
+    ASSERT_EQ(exp2_ee->IsWholeFileExpiryEnabled(), false);
     ASSERT_EQ(exp2_ee->ExpiryActivated(), false);
 
     // clean up (leave exp_ee alone, smart pointer in expiry_ee.cc will delete)
