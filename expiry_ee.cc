@@ -79,7 +79,7 @@ ExpiryModule::CreateExpiryModule(
     }   // if
 
     // also in case for bucket cache, 5 minute lifetime
-    new_mod->SetExpiryModuleExpiryMicros(GetTimeMinutes()+5*60*port::UINT64_ONE_SECOND_MICROS);
+    new_mod->SetExpiryModuleExpiryMicros(GetCachedTimeMicros()+5*60*port::UINT64_ONE_SECOND_MICROS);
 
     return(new_mod);
 

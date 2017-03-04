@@ -161,7 +161,7 @@ public:
         ee->NoteUserExpirySettings();
 
         // initialize clock that Throttle typically starts
-        SetTimeMinutes(port::TimeMicros());
+        SetCachedTimeMicros(port::TimeMicros());
 
     };
 
@@ -252,7 +252,7 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         router_count=gRouterCalls;
         router_fail=gRouterFails;
         before=port::TimeMicros();
-        SetTimeMinutes(before);
+        SetCachedTimeMicros(before);
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
         after=port::TimeMicros();
         ASSERT_EQ(flag, true);
@@ -286,7 +286,7 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         router_count=gRouterCalls;
         router_fail=gRouterFails;
         before=port::TimeMicros();
-        SetTimeMinutes(before);
+        SetCachedTimeMicros(before);
         module.SetExpiryMinutes(30);
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
         after=port::TimeMicros();
@@ -322,7 +322,7 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         router_count=gRouterCalls;
         router_fail=gRouterFails;
         before=port::TimeMicros();
-        SetTimeMinutes(before);
+        SetCachedTimeMicros(before);
         module.SetExpiryMinutes(30);
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
         after=port::TimeMicros();
@@ -358,7 +358,7 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         router_count=gRouterCalls;
         router_fail=gRouterFails;
         before=port::TimeMicros();
-        SetTimeMinutes(before);
+        SetCachedTimeMicros(before);
         module.SetExpiryMinutes(30);
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
         after=port::TimeMicros();
@@ -385,7 +385,7 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         router_count=gRouterCalls;
         router_fail=gRouterFails;
         before=port::TimeMicros();
-        SetTimeMinutes(before);
+        SetCachedTimeMicros(before);
         module.SetExpiryMinutes(30);
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
         after=port::TimeMicros();
@@ -409,7 +409,7 @@ TEST(ExpiryEETester, MemTableInserterCallback)
         router_fail=gRouterFails;
         before=port::TimeMicros();
         expiry=before - 1000;
-        SetTimeMinutes(before);
+        SetCachedTimeMicros(before);
         flag=module.MemTableInserterCallback(loop_slice, value, type, expiry);
         after=port::TimeMicros();
         ASSERT_EQ(flag, true);
@@ -466,7 +466,7 @@ TEST(ExpiryEETester, MemTableCallback)
     ASSERT_EQ(module.ExpiryActivated(), true);
 
     before=port::TimeMicros();
-    SetTimeMinutes(before);
+    SetCachedTimeMicros(before);
 
     // deletion, do nothing
     for (loop=0; loop<set_size; ++loop)
@@ -504,8 +504,8 @@ TEST(ExpiryEETester, MemTableCallback)
     // explicit expiry, but time in the future (test 3)
     //  (key test is that buckets that do not retrieve properties
     //   should return false)
-    before=GetTimeMinutes();
-    after=GetTimeMinutes() + 60*port::UINT64_ONE_SECOND_MICROS;
+    before=GetCachedTimeMicros();
+    after=GetCachedTimeMicros() + 60*port::UINT64_ONE_SECOND_MICROS;
     for (loop=0; loop<set_size; ++loop)
     {
         flag=BuildRiakKey(Set1[loop].m_BucketType,Set1[loop].m_Bucket,"ExplicitExpiryKey",key_string);
@@ -518,7 +518,7 @@ TEST(ExpiryEETester, MemTableCallback)
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, false);
         // advance the clock
-        SetTimeMinutes(after + 60*port::UINT64_ONE_SECOND_MICROS);
+        SetCachedTimeMicros(after + 60*port::UINT64_ONE_SECOND_MICROS);
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, Set1[loop].m_Test3);
         // disable expiry
@@ -530,7 +530,7 @@ TEST(ExpiryEETester, MemTableCallback)
         ASSERT_EQ(router_fail, gRouterFails);
 
         // reset expiry state each loop
-        SetTimeMinutes(before);
+        SetCachedTimeMicros(before);
         module.SetExpiryEnabled(true);
     }   // for
 
@@ -539,12 +539,12 @@ TEST(ExpiryEETester, MemTableCallback)
     //   should return false)
     module.SetExpiryEnabled(true);
     ASSERT_EQ(module.ExpiryActivated(), true);
-    SetTimeMinutes(port::TimeMicros());
-    before=GetTimeMinutes();
+    SetCachedTimeMicros(port::TimeMicros());
+    before=GetCachedTimeMicros();
     for (loop=0; loop<set_size; ++loop)
     {
         module.SetExpiryMinutes(2);
-        after=GetTimeMinutes();
+        after=GetCachedTimeMicros();
         flag=BuildRiakKey(Set1[loop].m_BucketType,Set1[loop].m_Bucket,"AgeKey",key_string);
         ASSERT_TRUE(flag);
 
@@ -555,19 +555,19 @@ TEST(ExpiryEETester, MemTableCallback)
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, false);
         // advance the clock one minute
-        SetTimeMinutes(after + 60*port::UINT64_ONE_SECOND_MICROS);
+        SetCachedTimeMicros(after + 60*port::UINT64_ONE_SECOND_MICROS);
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, false);
         // advance the clock three minute
-        SetTimeMinutes(after + 180*port::UINT64_ONE_SECOND_MICROS);
+        SetCachedTimeMicros(after + 180*port::UINT64_ONE_SECOND_MICROS);
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, false);
         // advance the clock 10 minute
-        SetTimeMinutes(after + 600*port::UINT64_ONE_SECOND_MICROS);
+        SetCachedTimeMicros(after + 600*port::UINT64_ONE_SECOND_MICROS);
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, Set1[loop].m_Test4);
         // advance the clock twenty minute
-        SetTimeMinutes(after + 1200*port::UINT64_ONE_SECOND_MICROS);
+        SetCachedTimeMicros(after + 1200*port::UINT64_ONE_SECOND_MICROS);
         flag=module.MemTableCallback(key1.internal_key());
         ASSERT_EQ(flag, Set1[loop].m_Test5);
         // disable expiry
@@ -582,7 +582,7 @@ TEST(ExpiryEETester, MemTableCallback)
         ASSERT_EQ(router_fail, gRouterFails);
 
         // reset expiry state each loop
-        SetTimeMinutes(before);
+        SetCachedTimeMicros(before);
         module.SetExpiryEnabled(true);
     }   // for
 
@@ -632,7 +632,7 @@ TEST(ExpiryEETester, CompactionFinalizeCallback1)
     level=config::kNumOverlapLevels;
 
     now=port::TimeMicros();
-    SetTimeMinutes(now);
+    SetCachedTimeMicros(now);
 
     // put two files into the level, no expiry
     file_ptr=new FileMetaData;
@@ -668,7 +668,7 @@ TEST(ExpiryEETester, CompactionFinalizeCallback1)
     module.SetExpiryEnabled(true);
     module.SetWholeFileExpiryEnabled(true);
     module.SetExpiryMinutes(5);
-    SetTimeMinutes(now + 360*port::UINT64_ONE_SECOND_MICROS);
+    SetCachedTimeMicros(now + 360*port::UINT64_ONE_SECOND_MICROS);
     ver.SetFileList(level, files);
     flag=module.CompactionFinalizeCallback(true, ver, level, NULL);
     ASSERT_EQ(flag, false);
@@ -820,14 +820,14 @@ public:
     };  // OneCompaction
 
     void SetClock(uint64_t Time)
-        {SetTimeMinutes(Time);};
+        {SetCachedTimeMicros(Time);};
 
     void ShiftClockMinutes(int Min)
     {
         uint64_t shift;
 
         shift=Min * 60 * port::UINT64_ONE_SECOND_MICROS;
-        SetTimeMinutes(GetTimeMinutes() + shift);
+        SetCachedTimeMicros(GetCachedTimeMicros() + shift);
     };
 };  // class ExpDB
 
