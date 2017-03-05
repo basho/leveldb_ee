@@ -123,7 +123,6 @@ TEST(PropCacheNoRouter, CreateNull)
     ShutdownPropertyCache();
 
     // try main interfaces again, see if segfault
-    ASSERT_TRUE(NULL==GetPropertyCachePtr());
     handle_one=Lookup(one_slice);
     ASSERT_TRUE(NULL==handle_one);
 
