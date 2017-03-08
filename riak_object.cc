@@ -59,10 +59,10 @@ const Binary16_t cStringPrefix={{0x6b, 0x00}};
 
 //struct RiakV1
 
-static bool SiblingGetLastModTime(
+static bool SiblingGetLastModTimeMicros(
     const uint8_t * &Cursor,
     const uint8_t * Limit,
-    uint64_t & ModTime);
+    uint64_t & ModTimeMicros);
 
 static bool FindDictionaryEntry(
     const char * Key,
@@ -78,7 +78,8 @@ static bool FindMetaEntry(
 
 static bool GetBinaryLength(const uint8_t * Cursor,
                             const uint8_t * Limit,
-                            int & Length);
+                            int & Length,
+                            bool DecodeLength=true);
 static bool GetBinary(const uint8_t * &Cursor,
                       const uint8_t * Limit,
                       uint8_t * Output);
@@ -91,17 +92,97 @@ static bool GetBinary(const uint8_t * &Cursor,
  */
 bool                          //< true if bucket found, false if not
 KeyGetBucket(
-    Slice & Key,              //< input: key to parse
+    const Slice & Key,        //< input: key to parse
     std::string & BucketType, //< output: bucket type string or clear()
     std::string & Bucket)     //< output: bucket string or clear()
 {
+    Slice composite_slice;
     bool ret_flag;
-    const uint8_t * cursor, * key_end;
+
+    ret_flag=KeyGetBucket(Key, composite_slice);
+
+    BucketType.clear();
+    Bucket.clear();
+
+    if (ret_flag)
+    {
+        KeyParseBucket(composite_slice, BucketType, Bucket);
+    }   // if
+
+    return(ret_flag);
+
+}   // KeyGetBucket (std::string)
+
+
+/**
+ * Originally part of KeyGetBucket std::string.  Broken out to
+ *  to allow late parsing of sext CompositeBucket by property cache.
+ *  ASSUMES CompositeBucket's formatting was verified prior to call.
+ */
+void
+KeyParseBucket(
+    const Slice & CompositeBucket,
+    std::string & BucketType,
+    std::string & Bucket)
+{
+    const uint8_t * key_end, *cursor;
+    int length;
+
+    BucketType.clear();
+    Bucket.clear();
+
+    key_end=(uint8_t *)CompositeBucket.data() + CompositeBucket.size();
+
+    // not checking returns about formatting since all checks should
+    //  have occurred within prior KeyGetBucket() call
+    cursor=(uint8_t *)CompositeBucket.data();
+
+    // tuple means bucket_type and bucket
+    if (16==*cursor)
+    {
+        // shift cursor to first char of binary
+        cursor+=6;
+        GetBinaryLength(cursor, key_end, length);
+        BucketType.resize(length);
+        GetBinary(cursor, key_end, (uint8_t *)BucketType.data());
+
+        ++cursor;
+        GetBinaryLength(cursor, key_end, length);
+        Bucket.resize(length);
+        GetBinary(cursor, key_end, (uint8_t *)Bucket.data());
+
+    }   // if
+
+    // binary name for bucket only
+    else
+    {
+        ++cursor;
+        GetBinaryLength(cursor, key_end, length);
+        Bucket.resize(length);
+        GetBinary(cursor, key_end, (uint8_t *)Bucket.data());
+    }   // else
+
+}   // KeyParseBucket
+
+
+/**
+ * Review Key to see if sext encoded Riak key.  If so,
+ *  parse out Bucket and potentially Bucket Type
+ *  This returns the slice of Bucket Type / Bucket, or just Bucket.
+ *  Intent is that the single slice will be lookup key in cache.
+ */
+bool                          //< true if bucket found, false if not
+KeyGetBucket(
+    const Slice & Key,        //< input: key to parse
+    Slice & CompositeBucket)  //< output: entire bucket_type/bucket tuple,
+                              //    or binary bucket name
+{
+    bool ret_flag;
+    const uint8_t * cursor, * key_end, *cursor_temp;
     int length;
 
     ret_flag=false;
-    BucketType.clear();
-    Bucket.clear();
+    CompositeBucket.clear();
 
     // hard coded decode for sext prefix of <<bucket>> or {<<bucket type>>,<<bucket>>}
     /// detect prefix
@@ -125,45 +206,52 @@ KeyGetBucket(
                 // second tuple is a tuple. its first tuple is binary tag 18: bucket type, bucket
                 if ((cursor+5)<key_end && 16==*cursor && 2==*(cursor+4) && 18==*(cursor+5))
                 {
-                    // shift cursor to first char of binary
+                    // return entire {<<bucket type>>, <<bucket>>} slice
+                    cursor_temp=cursor;
+
+                    // shift cursor to first char of bucket type's binary
                     cursor+=6;
-                    if (GetBinaryLength(cursor, key_end, length))
+                    if (GetBinaryLength(cursor, key_end, length, false))
                     {
-                        BucketType.resize(length);
-                        ret_flag=GetBinary(cursor, key_end, (uint8_t *)BucketType.data());
+                        cursor+=length;
 
                         // test for binary (bucket name)
-                        ret_flag=(ret_flag && cursor<key_end && 18==*cursor);
+                        ret_flag=cursor<key_end && 18==*cursor;
 
                         ++cursor;
-                        if (ret_flag && GetBinaryLength(cursor, key_end, length))
+                        if (ret_flag && GetBinaryLength(cursor, key_end, length, false))
                         {
-                            Bucket.resize(length);
-                            ret_flag=GetBinary(cursor, key_end, (uint8_t *)Bucket.data());
+                            cursor+=length;
+                            Slice temp((const char *)cursor_temp, (cursor-cursor_temp));
+                            CompositeBucket=temp;
                         }   // if
+                        else
+                        {
+                            ret_flag=false;
+                        }   // else
                     }   // if
                 }   // if
 
-                // 18 is binary tag:  buckey only
+                // 18 is binary tag:  bucket only
                 else if (18==*cursor)
                 {
+                    cursor_temp=cursor;
                     ++cursor;
-                    if (GetBinaryLength(cursor, key_end, length))
+                    if (GetBinaryLength(cursor, key_end, length, false))
                     {
-                        Bucket.resize(length);
-                        ret_flag=GetBinary(cursor, key_end, (uint8_t *)Bucket.data());
+                        cursor+=length;
+                        Slice temp((const char *)cursor_temp, (cursor-cursor_temp));
+                        CompositeBucket=temp;
+                        ret_flag=true;
                     }   // if
-
                 }   // else if
             }   // if
         }   // if
     }   // if
 
-
-
     return(ret_flag);
 
-}   // KeyGetBucket
+}   // KeyGetBucket (slice)
 
 
 // from riak_kv/src/riak_object.erl
@@ -180,9 +268,9 @@ KeyGetBucket(
  *  is ignored.
  */
 bool
-ValueGetLastModTime(
+ValueGetLastModTimeMicros(
     Slice Value,
-    uint64_t & LastModTime)
+    uint64_t & LastModTimeMicros)
 {
     bool ret_flag, good;
     const uint8_t * cursor, * limit;
@@ -190,10 +278,10 @@ ValueGetLastModTime(
     uint64_t most_recent, sib_time;
 
     ret_flag=false;
-    LastModTime=0;
+    LastModTimeMicros=0;
     cursor=(const uint8_t *)Value.data();
     limit=cursor + Value.size();
-
+    sib_time=0;
 
     // does this value object start like a Riak v1 object
     if (cRiakObjV1.m_Uint16==*(uint16_t *)cursor && (cursor+1)<limit)
@@ -212,7 +300,7 @@ ValueGetLastModTime(
         most_recent=0;
         for (loop=0, good=true; loop<sib_count && good && cursor<limit; ++loop)
         {
-            good=SiblingGetLastModTime(cursor, limit, sib_time);
+            good=SiblingGetLastModTimeMicros(cursor, limit, sib_time);
             if (good && most_recent<sib_time)
                 most_recent=sib_time;
         }   // for
@@ -220,19 +308,19 @@ ValueGetLastModTime(
         ret_flag=good && 0!=most_recent;
 
         if (ret_flag)
-            LastModTime=most_recent;
+            LastModTimeMicros=most_recent;
     }   // if
 
     return(ret_flag);
 
-}   // ValueGetLastModTime
+}   // ValueGetLastModTimeMicros
 
 
 bool
-SiblingGetLastModTime(
+SiblingGetLastModTimeMicros(
     const uint8_t * &Cursor, // start of sibling, output set to next sibling
     const uint8_t * Limit,   // overrun test
-    uint64_t & ModTime)
+    uint64_t & ModTimeMicros)
 {
     bool ret_flag;
     const uint8_t * cursor;
@@ -281,7 +369,7 @@ SiblingGetLastModTime(
             temp+=ntohl(*(uint32_t *)cursor);
             cursor+=sizeof(uint32_t);
 
-            ModTime=temp;
+            ModTimeMicros=temp;
             ret_flag=true;
         }   // if
 
@@ -340,7 +428,7 @@ SiblingGetLastModTime(
                 if (315550800 < temp && temp < 3471310800 && cursor<Limit)
                 {
                     // ModTime in microseconds
-                    ModTime=temp*1000000;
+                    ModTimeMicros=temp*1000000;
                     ret_flag=true;
                 }   // if
             }   // if
@@ -349,7 +437,7 @@ SiblingGetLastModTime(
 
     return(ret_flag);
 
-}   // SiblingGetLastModTime
+}   // SiblingGetLastModTimeMicros
 
 
 /**
@@ -407,7 +495,7 @@ FindMetaEntry(
     const uint8_t * Limit)   // overrun test
 {
     bool ret_flag, good;
-    uint32_t meta_len, key_len, val_len, list_len;
+    uint32_t meta_len, key_len, list_len;
     const uint8_t * meta_limit;
     uint16_t temp16;
 
@@ -500,13 +588,16 @@ bool
 GetBinaryLength(
     const uint8_t * Cursor, // first byte of binary (after tag)
     const uint8_t * Limit,  // safety limit / overrun protection
-    int & Length)           // output: count of bytes
+    int & Length,           // output: count of bytes
+    bool DecodedLength)
 {
     bool good, again;
     uint8_t mask;
+    const uint8_t * start;
 
     mask=0x80;
     Length=0;
+    start=Cursor;
 
     do
     {
@@ -529,6 +620,10 @@ GetBinaryLength(
             }   // if
         }   // if
     } while(again && good);
+
+    // +2 -> +1 for Cursor on 0 byte, +1 to next
+    if (!DecodedLength)
+        Length=(Cursor-start) +2;
 
     return(good);
 
@@ -589,6 +684,126 @@ bool GetBinary(
 }   // GetBinary
 
 
+/**
+ * Testing tool:  builds sext based binary from components
+ */
+bool
+BuildRiakKey(
+    const char * BucketType,
+    const char * Bucket,
+    const char * Key,
+    std::string & Output)
+{
+    bool ret_flag(true);
+    int tot_size;
+    char * cursor;
 
+    Output.clear();
+
+    if (NULL!=Bucket && NULL!=Key)
+    {
+        // calculate size of output
+        tot_size=5;       // tuple tag & tuple count
+        tot_size+=4;      // atom tag & 'o'
+
+        if (NULL!=BucketType && '\0'!=*BucketType)
+        {
+            tot_size+=5;  // tuple tag & tuple count
+            tot_size+= (strlen(BucketType)*8)/7 +3;
+        }
+
+        tot_size+= (strlen(Bucket)*8)/7 +3;
+        tot_size+= (strlen(Key)*8)/7 +3;
+
+        Output.resize(tot_size);
+        cursor=(char *)Output.data();
+        *(uint32_t *)cursor=cSextPrefix.m_Uint32;
+        cursor+=4;
+        *cursor=0x3;        // Riak key is a 3 tuple
+        ++cursor;
+        *(uint32_t *)cursor=cOKeyPrefix.m_Uint32;
+        cursor+=4;
+
+        if (NULL!=BucketType && '\0'!=*BucketType)
+        {
+            *(uint32_t *)cursor=cSextPrefix.m_Uint32;
+            cursor+=4;
+            *cursor=0x2;        // {type,bucket} tuple prefix
+            ++cursor;
+
+            WriteSextString(18, BucketType, cursor);
+        }   // if
+
+        WriteSextString(18, Bucket, cursor);
+        WriteSextString(18, Key, cursor);
+    }   // if
+    else
+    {
+        ret_flag=false;
+    }   // else
+
+    return(ret_flag);
+
+}   // BuildRiakKey
+
+
+/**
+ * Writes a binary encoded sext string.  Assumes
+ *  storage already allocated properly
+ */
+bool
+WriteSextString(
+    int Prefix,
+    const char * Text,
+    char * & Cursor)
+{
+    bool ret_flag(true), skip(false);
+    int position;
+    uint8_t new_char, carry_over, *input;
+
+    position=1;
+    carry_over=0;
+    input=(uint8_t *)Text;
+
+    *Cursor=(char)Prefix;
+    ++Cursor;
+
+    while(*input)
+    {
+        *Cursor=(1<<(8-position)) + carry_over + (*input >> position);
+        carry_over=((uint8_t)*input<<(8-position));
+        ++Cursor;
+        ++input;
+        ++position;
+        if (8==position)
+        {
+            position=1;
+            *Cursor=carry_over + (*input ? 1 : 0);
+            ++Cursor;
+            carry_over=0;
+            if (*input)
+            {
+                *Cursor=*input;
+                ++input;
+                ++Cursor;
+            }   // if
+            else
+            {
+                skip=true;
+            }   // elxe
+        }   // if
+    }   // while
+
+    if (!skip)
+    {
+        *Cursor=carry_over;
+        ++Cursor;
+    }   // if
+    *Cursor=0x08;
+    ++Cursor;
+
+    return(ret_flag);
+
+}   // WriteSextString
 
 }  // namespace leveldb

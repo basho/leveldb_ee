@@ -68,8 +68,12 @@ public:
  */
 TEST(RiakObjectTester, KeyDecodeTest)
 {
+    // secondary validation of test support routines BuildRiakKey and its
+    //  WriteSextString.  The binary keys here were extracted from actual
+    //  Riak leveldb keys.
+
     bool ret_flag;
-    std::string bucket_type, bucket;
+    std::string bucket_type, bucket, temp_str;
 
     // metadata key:  {md,fixed_indexes}
     const char md_key[]={0x10, 0x00, 0x00, 0x00, 0x02, 0x0c, 0xb6, 0xd9, 0x00, 0x08,
@@ -93,6 +97,10 @@ TEST(RiakObjectTester, KeyDecodeTest)
     ASSERT_TRUE(0==bucket_type.length());
     ASSERT_TRUE(0==bucket.compare("buck0"));
 
+    ret_flag=BuildRiakKey(NULL, "buck0", "yesterday", temp_str);
+    ASSERT_TRUE(ret_flag);
+    ASSERT_TRUE(0==memcmp(bo_key, temp_str.data(), sizeof(bo_key)));
+
     // bucket_type and bucket: {o,{<<bob3>>,<<buck3>>},<<key3>>}
     const char bt_key[]={0x10, 0x00, 0x00, 0x00, 0x03, 0x0c, 0xb7, 0x80, 0x08, 0x10,
                          0x00, 0x00, 0x00, 0x02, 0x12, 0xb1, 0x5b, 0xec, 0x53, 0x30,
@@ -100,10 +108,15 @@ TEST(RiakObjectTester, KeyDecodeTest)
                          0xb5, 0xd9, 0x6f, 0x33, 0x30, 0x08};
     Slice bt_slice(bt_key, sizeof(bt_key));
 
+
     ret_flag=KeyGetBucket(bt_slice, bucket_type, bucket);
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(0==bucket_type.compare("bob3"));
     ASSERT_TRUE(0==bucket.compare("buck3"));
+
+    ret_flag=BuildRiakKey("bob3", "buck3", "key3", temp_str);
+    ASSERT_TRUE(ret_flag);
+    ASSERT_TRUE(0==memcmp(bt_key, temp_str.data(), sizeof(bt_key)));
 
     // {o,{<<really_long_bucket_type_name>>,<<buck0>>},<<key0>>}
     const char lbt_key[]={0x10, 0x00, 0x00, 0x00, 0x03, 0x0c, 0xb7, 0x80, 0x08, 0x10,
@@ -139,6 +152,9 @@ TEST(RiakObjectTester, KeyDecodeTest)
     ASSERT_TRUE(0==bucket_type.compare("really_long_bucket_type_name"));
     ASSERT_TRUE(0==bucket.compare("even_longer_than_really_long_bucket_name"));
 
+    ret_flag=BuildRiakKey("really_long_bucket_type_name", "even_longer_than_really_long_bucket_name", "key0", temp_str);
+    ASSERT_TRUE(ret_flag);
+    ASSERT_TRUE(0==memcmp(rlb_key, temp_str.data(), sizeof(rlb_key)));
 
     //
     // verify the binary decode works for all sizes from 1 to 10 (algorithm repeats after 8)
@@ -166,6 +182,10 @@ TEST(RiakObjectTester, KeyDecodeTest)
     ASSERT_TRUE(0==bucket_type.length());
     ASSERT_TRUE(0==bucket.compare("b2"));
 
+    ret_flag=BuildRiakKey(NULL, "b2", "size2", temp_str);
+    ASSERT_TRUE(ret_flag);
+    ASSERT_TRUE(0==memcmp(b2_key, temp_str.data(), sizeof(b2_key)));
+
     //  {o,<<b23>>,<<size3>>}
     const char b3_key[]={0x10, 0x00, 0x00, 0x00, 0x03, 0x0c, 0xb7, 0x80, 0x08, 0x12,
                          0xb1, 0x4c, 0xa6, 0x60, 0x08, 0x12, 0xb9, 0xda, 0x6f, 0x56,
@@ -176,6 +196,10 @@ TEST(RiakObjectTester, KeyDecodeTest)
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(0==bucket_type.length());
     ASSERT_TRUE(0==bucket.compare("b23"));
+
+    ret_flag=BuildRiakKey(NULL, "b23", "size3", temp_str);
+    ASSERT_TRUE(ret_flag);
+    ASSERT_TRUE(0==memcmp(b3_key, temp_str.data(), sizeof(b3_key)));
 
     //  {o,<<b234>>,<<size4>>}
     const char b4_key[]={0x10, 0x00, 0x00, 0x00, 0x03, 0x0c, 0xb7, 0x80, 0x08, 0x12,
@@ -188,6 +212,10 @@ TEST(RiakObjectTester, KeyDecodeTest)
     ASSERT_TRUE(0==bucket_type.length());
     ASSERT_TRUE(0==bucket.compare("b234"));
 
+    ret_flag=BuildRiakKey(NULL, "b234", "size4", temp_str);
+    ASSERT_TRUE(ret_flag);
+    ASSERT_TRUE(0==memcmp(b4_key, temp_str.data(), sizeof(b4_key)));
+
     //  {o,<<b2345>>,<<size5>>}
     const char b5_key[]={0x10, 0x00, 0x00, 0x00, 0x03, 0x0c, 0xb7, 0x80, 0x08, 0x12,
                          0xb1, 0x4c, 0xa6, 0x73, 0x49, 0xa8, 0x08, 0x12, 0xb9, 0xda,
@@ -198,6 +226,10 @@ TEST(RiakObjectTester, KeyDecodeTest)
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(0==bucket_type.length());
     ASSERT_TRUE(0==bucket.compare("b2345"));
+
+    ret_flag=BuildRiakKey(NULL, "b2345", "size5", temp_str);
+    ASSERT_TRUE(ret_flag);
+    ASSERT_TRUE(0==memcmp(b5_key, temp_str.data(), sizeof(b5_key)));
 
     //  {o,<<b23456>>,<<size6>>}
     const char b6_key[]={0x10, 0x00, 0x00, 0x00, 0x03, 0x0c, 0xb7, 0x80, 0x08, 0x12,
@@ -210,6 +242,10 @@ TEST(RiakObjectTester, KeyDecodeTest)
     ASSERT_TRUE(0==bucket_type.length());
     ASSERT_TRUE(0==bucket.compare("b23456"));
 
+    ret_flag=BuildRiakKey(NULL, "b23456", "size6", temp_str);
+    ASSERT_TRUE(ret_flag);
+    ASSERT_TRUE(0==memcmp(b6_key, temp_str.data(), sizeof(b6_key)));
+
     //  {o,<<b234567>>,<<size7>>}
     const char b7_key[]={0x10, 0x00, 0x00, 0x00, 0x03, 0x0c, 0xb7, 0x80, 0x08, 0x12,
                          0xb1, 0x4c, 0xa6, 0x73, 0x49, 0xac, 0xda, 0x6e, 0x08, 0x12,
@@ -221,6 +257,9 @@ TEST(RiakObjectTester, KeyDecodeTest)
     ASSERT_TRUE(0==bucket_type.length());
     ASSERT_TRUE(0==bucket.compare("b234567"));
 
+    ret_flag=BuildRiakKey(NULL, "b234567", "size7", temp_str);
+    ASSERT_TRUE(ret_flag);
+    ASSERT_TRUE(0==memcmp(b7_key, temp_str.data(), sizeof(b7_key)));
 
     //  {o,<<b2345678>>,<<size8>>}
     const char b8_key[]={0x10, 0x00, 0x00, 0x00, 0x03, 0x0c, 0xb7, 0x80, 0x08, 0x12,
@@ -233,6 +272,10 @@ TEST(RiakObjectTester, KeyDecodeTest)
     ASSERT_TRUE(0==bucket_type.length());
     ASSERT_TRUE(0==bucket.compare("b2345678"));
 
+    ret_flag=BuildRiakKey(NULL, "b2345678", "size8", temp_str);
+    ASSERT_TRUE(ret_flag);
+    ASSERT_TRUE(0==memcmp(b8_key, temp_str.data(), sizeof(b8_key)));
+
     //  {o,<<b23456789>>,<<size9>>}
     const char b9_key[]={0x10, 0x00, 0x00, 0x00, 0x03, 0x0c, 0xb7, 0x80, 0x08, 0x12,
                          0xb1, 0x4c, 0xa6, 0x73, 0x49, 0xac, 0xda, 0x6f, 0x38, 0x9c,
@@ -243,6 +286,10 @@ TEST(RiakObjectTester, KeyDecodeTest)
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(0==bucket_type.length());
     ASSERT_TRUE(0==bucket.compare("b23456789"));
+
+    ret_flag=BuildRiakKey(NULL, "b23456789", "size9", temp_str);
+    ASSERT_TRUE(ret_flag);
+    ASSERT_TRUE(0==memcmp(b9_key, temp_str.data(), sizeof(b9_key)));
 
     //  {o,<<b234567890>>,<<size10>>}
     const char b10_key[]={0x10, 0x00, 0x00, 0x00, 0x03, 0x0c, 0xb7, 0x80, 0x08, 0x12,
@@ -255,6 +302,10 @@ TEST(RiakObjectTester, KeyDecodeTest)
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(0==bucket_type.length());
     ASSERT_TRUE(0==bucket.compare("b234567890"));
+
+    ret_flag=BuildRiakKey(NULL, "b234567890", "size10", temp_str);
+    ASSERT_TRUE(ret_flag);
+    ASSERT_TRUE(0==memcmp(b10_key, temp_str.data(), sizeof(b10_key)));
 
     //
     // Riak TS key
@@ -319,7 +370,7 @@ TEST(RiakObjectTester, LastModTest)
                               0x83, 0x6a};
     Slice patriot_slice(patriot_val, sizeof(patriot_val));
 
-    ret_flag=ValueGetLastModTime(patriot_slice, ret_time);
+    ret_flag=ValueGetLastModTimeMicros(patriot_slice, ret_time);
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(1245495600000000==ret_time);
 
@@ -356,7 +407,7 @@ TEST(RiakObjectTester, LastModTest)
                               0x6a};
     Slice too_old_slice(too_old_val, sizeof(too_old_val));
 
-    ret_flag=ValueGetLastModTime(too_old_slice, ret_time);
+    ret_flag=ValueGetLastModTimeMicros(too_old_slice, ret_time);
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(1479595921568747==ret_time);
 
@@ -393,7 +444,7 @@ TEST(RiakObjectTester, LastModTest)
                                  0x83, 0x6a};
     Slice futuristic_slice(futuristic_val, sizeof(futuristic_val));
 
-    ret_flag=ValueGetLastModTime(futuristic_slice, ret_time);
+    ret_flag=ValueGetLastModTimeMicros(futuristic_slice, ret_time);
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(1479595936409326==ret_time);
 
@@ -431,7 +482,7 @@ TEST(RiakObjectTester, LastModTest)
                               0x6a};
     Slice bad_num_slice(bad_num_val, sizeof(bad_num_val));
 
-    ret_flag=ValueGetLastModTime(bad_num_slice, ret_time);
+    ret_flag=ValueGetLastModTimeMicros(bad_num_slice, ret_time);
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(1479595964994514==ret_time);
 
@@ -469,7 +520,7 @@ TEST(RiakObjectTester, LastModTest)
                                 0x83, 0x6a};
     Slice text_date_slice(text_date_val, sizeof(text_date_val));
 
-    ret_flag=ValueGetLastModTime(text_date_slice, ret_time);
+    ret_flag=ValueGetLastModTimeMicros(text_date_slice, ret_time);
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(1479595955585967==ret_time);
 
@@ -510,7 +561,7 @@ TEST(RiakObjectTester, LastModTest)
                                    0x6e, 0x6b, 0x73, 0x00, 0x00, 0x00, 0x03, 0x00, 0x83, 0x6a};
     Slice before_after_slice(before_after_val, sizeof(before_after_val));
 
-    ret_flag=ValueGetLastModTime(before_after_slice, ret_time);
+    ret_flag=ValueGetLastModTimeMicros(before_after_slice, ret_time);
     ASSERT_TRUE(ret_flag);
     ASSERT_TRUE(1478342700000000==ret_time);
 
